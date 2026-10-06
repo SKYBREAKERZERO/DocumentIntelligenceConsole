@@ -1,0 +1,56 @@
+{
+  "QA": {
+    "source_file_name": "20260401_hyoukaQA.xlsx",
+    "source_kind_note": "full supplied QA list",
+    "detected_type": "QA",
+    "detection_confidence": 1.0,
+    "detection_scores": {
+      "QA": 653,
+      "BUG": 0
+    },
+    "column_count": 112,
+    "recognized_first_class_columns": 59,
+    "losslessly_preserved_columns": 53,
+    "canonical_documents": 14337,
+    "queryable_documents": 14337,
+    "quarantined_documents": 0,
+    "quality_flag_counts": {
+      "QA_ANSWER_MISSING": 2700
+    },
+    "repaired_records": 0,
+    "elapsed_seconds": 17.773,
+    "jsonschema_sampled_documents": 39
+  },
+  "BUG": {
+    "source_file_name": "貼り付けたテキスト（1）.txt",
+    "source_kind_note": "partial BUG/Jira export sample supplied by user",
+    "detected_type": "BUG",
+    "detection_confidence": 1.0,
+    "detection_scores": {
+      "QA": 0,
+      "BUG": 603
+    },
+    "column_count": 250,
+    "recognized_first_class_columns": 66,
+    "losslessly_preserved_columns": 184,
+    "canonical_documents": 3962,
+    "queryable_documents": 3955,
+    "quarantined_documents": 7,
+    "quality_flag_counts": {
+      "BUG_ROOT_CAUSE_UNRECORDED": 95,
+      "SOURCE_FRAGMENT_REPAIRED": 1,
+      "SOURCE_COLUMN_COUNT_MISMATCH": 7,
+      "MISSING_ISSUE_KEY": 6,
+      "MISSING_STATUS": 6
+    },
+    "repaired_records": 1,
+    "elapsed_seconds": 6.186,
+    "jsonschema_sampled_documents": 28
+  },
+  "validation_contract": {
+    "canonical_schema": "Enterprise QA/BUG RAG Canonical Document v1.0.0",
+    "json_schema_sample_strategy": "first 25 documents plus every 1000th document per source",
+    "real_source_content_packaged": false,
+    "note": "Only schema/mapping/count summaries are shipped; private source rows are not included."
+  }
+}

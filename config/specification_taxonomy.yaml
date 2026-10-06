@@ -1,0 +1,1882 @@
+version: 2026.09.02-v1
+classification:
+  body_fallback_enabled: false
+  minimum_keyword_length: 2
+  exact_rule_bonus: 1000
+  subtype_bonus: 200
+  source_weights:
+    file_name: 300
+    metadata.specification_title: 250
+    metadata.document_title: 250
+    metadata.title: 240
+    chapter.title: 80
+    section.title: 60
+    content.text: 5
+region_aliases:
+  EXCEPT_NA:
+  - Except NA
+  - ExceptNA
+  - 北米以外
+  NA:
+  - '[NA]'
+  - _NA_
+  - ' NA '
+  - North America
+  - TMNA
+  JP_NA_CN:
+  - JP_NA_CN
+  - JP,NA,CN
+  - 日本北米中国
+  JP_NA_EU:
+  - JP_NA_EU
+  - 日本・北米・欧州
+  NA_EU_AU:
+  - NA_EU_AU
+  - NA EU AU
+  JP_NA_EU_CN:
+  - JP_NA_EU_CN
+  - JP_NA_EU_CN
+  JP:
+  - '[JP]'
+  - 日本
+  CN:
+  - '[CN]'
+  - 中国
+  KR:
+  - '[KR]'
+  - 韓国
+  TW:
+  - '[TW]'
+  - 台湾
+  EU:
+  - '[EU]'
+  - 欧州
+  - '[欧]'
+  AU:
+  - '[AU]'
+  - 豪州
+spec_types:
+  SYSTEM:
+    display_name: System
+    keywords:
+    - System Spec
+    - システム仕様
+  SERVICE_LIST:
+    display_name: Service List
+    keywords:
+    - Service List
+    - ServiceList
+    - サービスリスト
+  SET_SPEC:
+    display_name: Set Specification
+    keywords:
+    - Set Spec
+    - セット仕様
+    subtypes:
+      DA_AVN_EMV:
+        display_name: DA / AVN / EMV Set
+        keywords:
+        - DA / AVN / EMV Set
+  COMMUNICATION:
+    display_name: Communication
+    keywords:
+    - Communication Spec
+    - 通信仕様
+  HMI:
+    display_name: HMI
+    keywords:
+    - HMI
+    - Human Machine Interface
+    subtypes:
+      HMI_GUIDELINE:
+        display_name: HMI Guideline
+        keywords:
+        - HMI Guideline
+        - HMIガイドライン
+      HMI_RULEBOOK:
+        display_name: HMI Rulebook
+        keywords:
+        - HMI Rulebook
+        - HMIルールブック
+      HMI_CONCEPT:
+        display_name: HMI Concept
+        keywords:
+        - HMI Concept
+        - HMIコンセプト
+      HMI_COMMON_DEFINITION:
+        display_name: HMI Common Definition
+        keywords:
+        - HMI Project Common Definitions
+        - HMIプロジェクト共通定義
+      HMI_LOCKOUT:
+        display_name: HMI Lockout
+        keywords:
+        - HMI Lockout
+        - HMI走行規制
+      HMI_SCREEN_DESIGN:
+        display_name: Screen Design
+        keywords:
+        - Screen Design
+        - 画面意匠
+      HMI_SCREEN_DESIGN_ANIMATION:
+        display_name: Screen Design and Animation
+        keywords:
+        - Screen Design and Animation
+      HMI_ANIMATION:
+        display_name: Animation
+        keywords:
+        - Animation Spec
+        - アニメーション仕様
+      HMI_ALERT:
+        display_name: Alert HMI
+        keywords:
+        - Alert HMI
+      HMI_USER_PROFILE:
+        display_name: User Profile HMI
+        keywords:
+        - User Profile HMI
+      HMI_NAVIGATION:
+        display_name: Navigation HMI
+        keywords:
+        - Navigation HMI
+      HMI_MEDIA:
+        display_name: Media HMI
+        keywords:
+        - Media HMI
+      HMI_IP_APPS:
+        display_name: IP Apps HMI
+        keywords:
+        - IP Apps HMI
+      HMI_PHONE:
+        display_name: Phone HMI
+        keywords:
+        - Phone HMI
+      HMI_OTA:
+        display_name: OTA HMI
+        keywords:
+        - OTA HMI
+      HMI_AACN:
+        display_name: AACN HMI
+        keywords:
+        - AACN HMI
+        - ACCN HMI
+      HMI_SYSTEM:
+        display_name: System HMI
+        keywords:
+        - System HMI
+      HMI_VOICE_AGENT:
+        display_name: Voice Agent HMI
+        keywords:
+        - Voice Agent HMI
+      HMI_UNIVERSAL_SEARCH:
+        display_name: Universal Search HMI
+        keywords:
+        - Universal Search HMI
+      HMI_REMOTE_SERVICE:
+        display_name: Remote Service HMI
+        keywords:
+        - Remote Service HMI
+      HMI_VEHICLE_INTEGRATION:
+        display_name: Vehicle Integration HMI
+        keywords:
+        - Vehicle Integration HMI
+        - Vhicle Integration HMI
+      HMI_VUI:
+        display_name: VUI HMI
+        keywords:
+        - VUI HMI
+      HMI_AIR_CONDITIONER:
+        display_name: Air Conditioner HMI
+        keywords:
+        - Air Conditioner HMI
+        - エアコンHMI
+      HMI_VEHICLE_SETTINGS:
+        display_name: Vehicle Settings HMI
+        keywords:
+        - Vehicle settings HMI
+        - 車両系設定HMI
+      HMI_AIS_COCKPIT:
+        display_name: Ais-Cockpit HMI
+        keywords:
+        - Ais-Cockpit Area HMI
+      HMI_ALLWORDS:
+        display_name: AllWords
+        keywords:
+        - AllWords
+        - Allwords
+  BT:
+    display_name: Bluetooth
+    keywords:
+    - Bluetooth Function
+    - Bluetooth Specification
+    - Bluetooth
+    - ブルートゥース
+    - BT
+    subtypes:
+      BLUETOOTH_AUDIO:
+        display_name: Bluetooth Audio
+        keywords:
+        - Bluetooth Audio Function
+        - Bluetooth Audio
+        - BT Audio
+  WIFI:
+    display_name: Wi-Fi
+    keywords:
+    - Wi-Fi Function
+    - WiFi Function
+    - Wi-Fi
+    - WiFi
+    - WLAN
+    - ワイファイ
+    subtypes:
+      WIFI_HOTSPOT:
+        display_name: Wi-Fi Hotspot
+        keywords:
+        - Wi-Fi Hotspot
+        - WiFi Hotspot
+  AUDIO:
+    display_name: Audio
+    keywords:
+    - Audio Function
+    - Audio
+    - オーディオ
+    subtypes:
+      AUDIO_FUNCTION:
+        display_name: Audio Function
+        keywords:
+        - Audio Function Spec
+        - Audio機能仕様
+      CONNECTED_AUDIO:
+        display_name: Connected Audio
+        keywords:
+        - ConnectedAudio Function
+        - Connected Audio function
+        - StreamingAudio
+        - Connected Audio
+      CONNECTED_AUDIO_COMMUNICATION:
+        display_name: Connected Audio Communication
+        keywords:
+        - ConnectedAudio Communication
+        - Connected Audio Communication
+      CONNECTED_RADIO:
+        display_name: Connected Radio
+        keywords:
+        - Connected Radio
+      AUDIO_PERFORMANCE:
+        display_name: Audio Performance
+        keywords:
+        - Audio Performance
+        - オーディオ性能
+      AUDIO_MICROPHONE:
+        display_name: Microphone
+        keywords:
+        - Microphone Specification
+      AUDIO_VOLUME_CONTROL:
+        display_name: Volume Control
+        keywords:
+        - Volume control
+        - 音量制御
+  HANDSFREE:
+    display_name: Handsfree
+    keywords:
+    - Handsfree Function
+    - Handsfree
+    - Hands Free
+    - ハンズフリー
+  NAVIGATION:
+    display_name: Navigation
+    keywords:
+    - Navigation Function
+    - Navigation
+    - Navi
+    - ナビ
+    subtypes:
+      NAVIGATION_FUNCTION:
+        display_name: Navigation Function
+        keywords:
+        - Navigation Function Spec
+      NAVIGATION_COMMUNICATION:
+        display_name: Navigation Communication
+        keywords:
+        - Navigation Communication
+      NAVIGATION_DESTINATION_ASSIST:
+        display_name: Destination Assist
+        keywords:
+        - Destination Assist
+      NAVIGATION_SERVICE:
+        display_name: Navigation Service
+        keywords:
+        - Navi Service
+        - Navigation Service
+      NAVIGATION_ARL:
+        display_name: Navigation ARL
+        keywords:
+        - Navi ARL
+        - Navigation ARL
+  USER_PROFILE:
+    display_name: User Profile
+    keywords:
+    - User Profile
+    - 個人特定システム
+    subtypes:
+      USER_PROFILE_FUNCTION:
+        display_name: User Profile Function
+        keywords:
+        - User Profile function Spec
+        - User Profile Function Spec
+      USER_PROFILE_SEQUENCE:
+        display_name: User Profile Sequence
+        keywords:
+        - User Profile Sequence
+      USER_PROFILE_COMMUNICATION:
+        display_name: User Profile Communication
+        keywords:
+        - 個人特定システム車載機センター間通信
+  SEARCH:
+    display_name: Search
+    keywords:
+    - Universal Search
+    - Search Communication
+    - ユニバーサルサーチ
+    subtypes:
+      SEARCH_UNIVERSAL_SEARCH:
+        display_name: Universal Search
+        keywords:
+        - Universal Search Function
+        - Universal Search function
+      SEARCH_COMMUNICATION:
+        display_name: Search Communication
+        keywords:
+        - Search Communication
+      SEARCH_SEQUENCE:
+        display_name: Search Sequence
+        keywords:
+        - Universal Search sequence
+  WEB_BROWSER:
+    display_name: Web Browser
+    keywords:
+    - Web Browser
+    - WEB Browser
+    - WEBブラウザ
+    subtypes:
+      WEB_BROWSER_FUNCTION:
+        display_name: Web Browser Function
+        keywords:
+        - Web Browser Function
+        - WEB Browser Function
+      WEB_BROWSER_COMMUNICATION:
+        display_name: Web Browser Communication
+        keywords:
+        - Web Browser Communication
+  APP_DATA_REPORTING:
+    display_name: App Data Reporting
+    keywords:
+    - App Data Reporting
+    subtypes:
+      APP_DATA_REPORTING_FUNCTION:
+        display_name: App Data Reporting
+        keywords:
+        - App Data Reporting
+      APP_DATA_REPORTING_COMMUNICATION:
+        display_name: App Data Reporting Communication
+        keywords:
+        - App Data Reporting Communication
+  CARPLAY:
+    display_name: CarPlay
+    keywords:
+    - CarPlay
+  ANDROID_AUTO:
+    display_name: Android Auto
+    keywords:
+    - Android Auto
+  CARLIFE:
+    display_name: CarLife
+    keywords:
+    - CarLife
+  MIRACAST:
+    display_name: Miracast
+    keywords:
+    - Miracast
+  SMART_DEVICE_LINK:
+    display_name: SmartDeviceLink
+    keywords:
+    - SmartDeviceLink
+    - SDL
+  MOBILE_DEVICE_MANAGEMENT:
+    display_name: Mobile Device Management
+    keywords:
+    - Mobile Device Management
+    - モバイルデバイスマネジメント
+  WELINK:
+    display_name: WeLink
+    keywords:
+    - WeLink
+  VIRTUAL_ASSISTANT:
+    display_name: Virtual Assistant
+    keywords:
+    - Virtual Assistant
+  VUI:
+    display_name: VUI
+    keywords:
+    - VUI Function
+    - VUI
+  AGENT:
+    display_name: Agent
+    keywords:
+    - Agent Guideline
+    - Agent Function
+    - Agent to agent
+    - エージェント
+  DIAGNOSTIC:
+    display_name: Diagnostic
+    keywords:
+    - Diagnostic
+    - ダイアグ
+  REPROGRAM:
+    display_name: Reprogram
+    keywords:
+    - Reprogram
+    - Reprogramming
+    - リプログラム
+    - リプロ
+  SECURITY:
+    display_name: Security
+    keywords:
+    - Information Security
+    - Security lock
+    - セキュリティ
+  PRIVACY:
+    display_name: Privacy
+    keywords:
+    - Privacy protection
+    - プライバシー
+  ETC_DSRC:
+    display_name: ETC / DSRC
+    keywords:
+    - ETC DSRC
+    - ETC-DSRC
+    - DSRC
+    - VICS
+  CAMERA:
+    display_name: Camera / Visual Data
+    keywords:
+    - Camera Image
+    - Camera
+    - カメラ映像
+    - 画像データ
+  REMOTE_SERVICE:
+    display_name: Remote Service
+    keywords:
+    - Remote Service
+    - RemoteServices
+    - リモートサービス
+  TELEMATICS:
+    display_name: Telematics
+    keywords:
+    - Telematics
+  DATA_PORTABILITY:
+    display_name: Data Portability
+    keywords:
+    - Data Portability
+  APPLICATION_DELIVERY:
+    display_name: Application Delivery
+    keywords:
+    - Application Delivery System
+    - 配信アプリシステム
+  VEHICLE_DATA:
+    display_name: Vehicle Data
+    keywords:
+    - Vehicle probe data
+    - Vehicles probe data
+    - プローブデータ
+  DATA_COLLECTION:
+    display_name: Data Collection
+    keywords:
+    - Market Data Collection
+    - Data Collection
+    - データ収集
+  DIGITAL_KEY:
+    display_name: Digital Key
+    keywords:
+    - Digital key
+    - デジタルキー
+  SETTINGS:
+    display_name: Settings
+    keywords:
+    - Settings Function
+    - 設定機能仕様
+  OPERATOR_SERVICE:
+    display_name: Operator Service
+    keywords:
+    - Operator Service
+    - オペレーターサービス
+  DTV:
+    display_name: Digital TV
+    keywords:
+    - DTV
+    - Digital TV
+    - Digital Television
+    - デジタルTV
+    - デジタルテレビ
+  HOME_SCREEN:
+    display_name: Home Screen
+    keywords:
+    - Home Screen
+  QUICK_CONTROL:
+    display_name: Quick Control
+    keywords:
+    - Quick Control
+  ELECTRONIC_OM:
+    display_name: Electronic OM
+    keywords:
+    - Electronic OM
+    - 電子OM
+exact_rules:
+- rule_id: NA:110
+  region_scope: NA
+  spec_id: '110'
+  spec_type: SERVICE_LIST
+  name_keywords:
+  - Service List
+- rule_id: NA:111
+  region_scope: NA
+  spec_id: '111'
+  spec_type: SET_SPEC
+  spec_subtype: DA_AVN_EMV
+  name_keywords:
+  - DA AVN EMV Set
+- rule_id: NA:162
+  region_scope: NA
+  spec_id: '162'
+  spec_type: APP_DATA_REPORTING
+  spec_subtype: APP_DATA_REPORTING_COMMUNICATION
+  name_keywords:
+  - App Data Reporting Communication
+- rule_id: NA:163
+  region_scope: NA
+  spec_id: '163'
+  spec_type: SEARCH
+  spec_subtype: SEARCH_COMMUNICATION
+  name_keywords:
+  - Search Communication
+- rule_id: NA:164
+  region_scope: NA
+  spec_id: '164'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_COMMUNICATION
+  name_keywords:
+  - Navigation Communication
+- rule_id: NA:167
+  region_scope: NA
+  spec_id: '167'
+  spec_type: AUDIO
+  spec_subtype: CONNECTED_AUDIO_COMMUNICATION
+  name_keywords:
+  - ConnectedAudio Communication
+  - Connected Audio Communication
+- rule_id: NA:171
+  region_scope: NA
+  spec_id: '171'
+  spec_type: WEB_BROWSER
+  spec_subtype: WEB_BROWSER_COMMUNICATION
+  name_keywords:
+  - Web Browser Communication
+- rule_id: NA:200
+  region_scope: NA
+  spec_id: '200'
+  spec_type: HMI
+  name_keywords:
+  - HMI Spec
+- rule_id: NA:202
+  region_scope: NA
+  spec_id: '202'
+  spec_type: HMI
+  spec_subtype: HMI_CONCEPT
+  name_keywords:
+  - HMI Concept Documentation
+- rule_id: NA:203
+  region_scope: NA
+  spec_id: '203'
+  spec_type: HMI
+  spec_subtype: HMI_COMMON_DEFINITION
+  name_keywords:
+  - HMI Project Common Definitions
+- rule_id: NA:206
+  region_scope: NA
+  spec_id: '206'
+  spec_type: HMI
+  spec_subtype: HMI_LOCKOUT
+  name_keywords:
+  - HMI Lockout
+- rule_id: NA:208
+  region_scope: NA
+  spec_id: '208'
+  spec_type: HMI
+  spec_subtype: HMI_SCREEN_DESIGN
+  name_keywords:
+  - Screen Design Spec
+- rule_id: NA:209
+  region_scope: NA
+  spec_id: '209'
+  spec_type: HMI
+  spec_subtype: HMI_SCREEN_DESIGN_ANIMATION
+  name_keywords:
+  - Screen Design and Animation
+- rule_id: NA:229
+  region_scope: NA
+  spec_id: '229'
+  spec_type: HMI
+  spec_subtype: HMI_ALLWORDS
+  name_keywords:
+  - Allwords Spec
+  - AllWords
+- rule_id: NA:502
+  region_scope: NA
+  spec_id: '502'
+  spec_type: APP_DATA_REPORTING
+  spec_subtype: APP_DATA_REPORTING_FUNCTION
+  name_keywords:
+  - App Data Reporting
+- rule_id: NA:505
+  region_scope: NA
+  spec_id: '505'
+  spec_type: SEARCH
+  spec_subtype: SEARCH_UNIVERSAL_SEARCH
+  name_keywords:
+  - Universal Search Function
+- rule_id: NA:521
+  region_scope: NA
+  spec_id: '521'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_FUNCTION
+  name_keywords:
+  - Navigation Function
+- rule_id: NA:530:CONNECTED_AUDIO
+  region_scope: NA
+  spec_id: '530'
+  spec_type: AUDIO
+  spec_subtype: CONNECTED_AUDIO
+  name_keywords:
+  - ConnectedAudio Function
+- rule_id: NA:530
+  region_scope: NA
+  spec_id: '530'
+  spec_type: AUDIO
+  spec_subtype: AUDIO_FUNCTION
+  name_keywords:
+  - Audio Function
+- rule_id: NA:555
+  region_scope: NA
+  spec_id: '555'
+  spec_type: VIRTUAL_ASSISTANT
+  name_keywords:
+  - Virtual Assistant
+- rule_id: NA:705
+  region_scope: NA
+  spec_id: '705'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_DESTINATION_ASSIST
+  name_keywords:
+  - Destination Assist
+- rule_id: NA:706
+  region_scope: NA
+  spec_id: '706'
+  spec_type: WEB_BROWSER
+  spec_subtype: WEB_BROWSER_FUNCTION
+  name_keywords:
+  - Web Browser Function
+- rule_id: NA:716
+  region_scope: NA
+  spec_id: '716'
+  spec_type: DATA_PORTABILITY
+  name_keywords:
+  - Data Portability
+- rule_id: EXCEPT_NA:100:1
+  region_scope: EXCEPT_NA
+  spec_id: '100'
+  spec_type: SYSTEM
+  name_keywords:
+  - System Spec
+  - システム仕様
+  - システム仕様書 System Spec
+- rule_id: EXCEPT_NA:107:1
+  region_scope: EXCEPT_NA
+  spec_id: '107'
+  spec_type: AUDIO
+  spec_subtype: AUDIO_VOLUME_CONTROL
+  name_keywords:
+  - Volume control
+  - 音量制御
+  - Audio Function
+  - Audio
+- rule_id: EXCEPT_NA:110:1
+  region_scope: EXCEPT_NA
+  spec_id: '110'
+  spec_type: SERVICE_LIST
+  name_keywords:
+  - Service List
+  - ServiceList
+  - サービスリスト ServiceList
+- rule_id: EXCEPT_NA:111:1
+  region_scope: EXCEPT_NA
+  spec_id: '111'
+  spec_type: SET_SPEC
+  name_keywords:
+  - Set Spec
+  - セット仕様
+  - 内機セット仕様書 Set Spec
+- rule_id: EXCEPT_NA:117:1
+  region_scope: EXCEPT_NA
+  spec_id: '117'
+  spec_type: SET_SPEC
+  name_keywords:
+  - Set Spec
+  - セット仕様
+  - 韓国MEUセット仕様書 Korea Multimedia Ext Unit Set Spec
+- rule_id: EXCEPT_NA:120:1
+  region_scope: EXCEPT_NA
+  spec_id: '120'
+  spec_type: SET_SPEC
+  name_keywords:
+  - Set Spec
+  - セット仕様
+  - Display内機セット仕様書 Common Display Set Spec
+- rule_id: EXCEPT_NA:130:1
+  region_scope: EXCEPT_NA
+  spec_id: '130'
+  spec_type: SET_SPEC
+  name_keywords:
+  - Set Spec
+  - セット仕様
+  - 別体デッキセット仕様書 External Deck Set Spec
+- rule_id: EXCEPT_NA:131:1
+  region_scope: EXCEPT_NA
+  spec_id: '131'
+  spec_type: SET_SPEC
+  name_keywords:
+  - Set Spec
+  - セット仕様
+  - IF-BOXセット仕様書 Interface box Set spec
+- rule_id: EXCEPT_NA:135:1
+  region_scope: EXCEPT_NA
+  spec_id: '135'
+  spec_type: SECURITY
+  name_keywords:
+  - Information Security
+  - Security lock
+  - 台湾セキュリティロック要求仕様 Security lock Spec
+- rule_id: EXCEPT_NA:150:1
+  region_scope: EXCEPT_NA
+  spec_id: '150'
+  spec_type: COMMUNICATION
+  name_keywords:
+  - Communication Spec
+  - 通信仕様
+  - MMシステムCAN通信仕様書 Multi-Media system CAN Communication Spec
+- rule_id: EXCEPT_NA:158:1
+  region_scope: EXCEPT_NA
+  spec_id: '158'
+  spec_type: COMMUNICATION
+  name_keywords:
+  - Communication Spec
+  - 通信仕様
+  - MM-SUB-BUS通信仕様 MM-SUB-BUS Communication Spec
+- rule_id: EXCEPT_NA:160:1
+  region_scope: EXCEPT_NA
+  spec_id: '160'
+  spec_type: REPROGRAM
+  name_keywords:
+  - Reprogram
+  - Reprogramming
+  - リプログラム 車載機-センタ間 IF仕様書 Reprogram IF Spec between Head Unit and Center
+- rule_id: EXCEPT_NA:161:1
+  region_scope: EXCEPT_NA
+  spec_id: '161'
+  spec_type: REPROGRAM
+  name_keywords:
+  - Reprogram
+  - Reprogramming
+  - リプログラム 車載機間-IF仕様書 Reprogram IF Spec between ECUs
+- rule_id: EXCEPT_NA:165:1
+  region_scope: EXCEPT_NA
+  spec_id: '165'
+  spec_type: USER_PROFILE
+  spec_subtype: USER_PROFILE_COMMUNICATION
+  name_keywords:
+  - 個人特定システム車載機センター間通信
+  - User Profile
+  - 個人特定システム
+  - 個人特定システム車載機センター間通信仕様書
+- rule_id: EXCEPT_NA:167:1
+  region_scope: EXCEPT_NA
+  spec_id: '167'
+  spec_type: BT
+  name_keywords:
+  - Wireless Rear Controller BT Conversion
+  - ワイヤレスリアコンBT変換
+- rule_id: EXCEPT_NA:175:1
+  region_scope: EXCEPT_NA
+  spec_id: '175'
+  spec_type: COMMUNICATION
+  name_keywords:
+  - Communication Spec
+  - 通信仕様
+  - FCM-MM LVDS 映像データ通信仕様書 FCM-MM LVDS Image Data Communication Spec
+- rule_id: EXCEPT_NA:176:1
+  region_scope: EXCEPT_NA
+  spec_id: '176'
+  spec_type: COMMUNICATION
+  name_keywords:
+  - Communication Spec
+  - 通信仕様
+  - FCM-MM LVDS SPI通信仕様書 FCM-MM LVDS SPI Communication Spec
+- rule_id: EXCEPT_NA:177:1
+  region_scope: EXCEPT_NA
+  spec_id: '177'
+  spec_type: CAMERA
+  name_keywords:
+  - Camera Image
+  - Camera
+  - カメラ映像情報活用車載機センター間IF仕様書 Camera Image Data Utilization IF Spec between Head Unit and Center
+- rule_id: EXCEPT_NA:180:1
+  region_scope: EXCEPT_NA
+  spec_id: '180'
+  spec_type: ETC_DSRC
+  name_keywords:
+  - ETC DSRC
+  - ETC-DSRC
+  - DSRC USBデバイス仕様書 DSRC-USB Device Spec
+- rule_id: EXCEPT_NA:181:1
+  region_scope: EXCEPT_NA
+  spec_id: '181'
+  spec_type: ETC_DSRC
+  name_keywords:
+  - ETC DSRC
+  - ETC-DSRC
+  - ETC DSRC USBシーケンス仕様書 ETC DSRC USB Sequence Spec
+- rule_id: EXCEPT_NA:182:1
+  region_scope: EXCEPT_NA
+  spec_id: '182'
+  spec_type: ETC_DSRC
+  name_keywords:
+  - ETC DSRC
+  - ETC-DSRC
+  - DSRCアプリケーション系コマンド仕様書 DSRC Application Command Spec
+- rule_id: EXCEPT_NA:183:1
+  region_scope: EXCEPT_NA
+  spec_id: '183'
+  spec_type: ETC_DSRC
+  name_keywords:
+  - ETC DSRC
+  - ETC-DSRC
+  - USB車両情報系コマンド仕様書市販DSRC制御ユニット(87h) USB Vehicle Information Command Spec
+- rule_id: EXCEPT_NA:184:1
+  region_scope: EXCEPT_NA
+  spec_id: '184'
+  spec_type: ETC_DSRC
+  name_keywords:
+  - ETC DSRC
+  - ETC-DSRC
+  - USB光VICS系プロトコル仕様書 USB Optical VICS Protocol Spec
+- rule_id: EXCEPT_NA:185:1
+  region_scope: EXCEPT_NA
+  spec_id: '185'
+  spec_type: ETC_DSRC
+  name_keywords:
+  - ETC DSRC
+  - ETC-DSRC
+  - USB光VICS系コマンド仕様書 USB Optical VICS Command Spec
+- rule_id: EXCEPT_NA:186:1
+  region_scope: EXCEPT_NA
+  spec_id: '186'
+  spec_type: ETC_DSRC
+  name_keywords:
+  - ETC DSRC
+  - ETC-DSRC
+  - ETC USBデバイス仕様書 ETC-USB Device Spec
+- rule_id: EXCEPT_NA:188:1
+  region_scope: EXCEPT_NA
+  spec_id: '188'
+  spec_type: ETC_DSRC
+  name_keywords:
+  - ETC DSRC
+  - ETC-DSRC
+  - USB DSRCアプリケーション系 プロトコル仕様書 USB DSRC Application Protocol Spec
+- rule_id: EXCEPT_NA:190:1
+  region_scope: EXCEPT_NA
+  spec_id: '190'
+  spec_type: SECURITY
+  name_keywords:
+  - Information Security
+  - Security lock
+  - 情報セキュリティ要求仕様書 MMInformation Security Requirement Spec
+- rule_id: EXCEPT_NA:191:1
+  region_scope: EXCEPT_NA
+  spec_id: '191'
+  spec_type: PRIVACY
+  name_keywords:
+  - Privacy protection
+  - プライバシー
+  - プライバシー保護機能仕様書 Privacy protection function Spec
+- rule_id: EXCEPT_NA:200:1
+  region_scope: EXCEPT_NA
+  spec_id: '200'
+  spec_type: HMI
+  spec_subtype: HMI_GUIDELINE
+  name_keywords:
+  - HMI Guideline
+  - HMIガイドライン
+  - HMI
+  - Human Machine Interface
+- rule_id: EXCEPT_NA:201:1
+  region_scope: EXCEPT_NA
+  spec_id: '201'
+  spec_type: HMI
+  spec_subtype: HMI_RULEBOOK
+  name_keywords:
+  - HMI Rulebook
+  - HMIルールブック
+  - HMI
+  - Human Machine Interface
+- rule_id: EXCEPT_NA:202:1
+  region_scope: EXCEPT_NA
+  spec_id: '202'
+  spec_type: HMI
+  spec_subtype: HMI_CONCEPT
+  name_keywords:
+  - HMI Concept
+  - HMIコンセプト
+  - HMI
+  - Human Machine Interface
+- rule_id: EXCEPT_NA:203:1
+  region_scope: EXCEPT_NA
+  spec_id: '203'
+  spec_type: HMI
+  spec_subtype: HMI_COMMON_DEFINITION
+  name_keywords:
+  - HMI Project Common Definitions
+  - HMIプロジェクト共通定義
+  - HMI
+  - Human Machine Interface
+- rule_id: EXCEPT_NA:206:1
+  region_scope: EXCEPT_NA
+  spec_id: '206'
+  spec_type: HMI
+  spec_subtype: HMI_LOCKOUT
+  name_keywords:
+  - HMI Lockout
+  - HMI走行規制
+  - HMI
+  - Human Machine Interface
+- rule_id: EXCEPT_NA:208:1
+  region_scope: EXCEPT_NA
+  spec_id: '208'
+  spec_type: HMI
+  spec_subtype: HMI_SCREEN_DESIGN
+  name_keywords:
+  - Screen Design
+  - 画面意匠
+  - HMI
+  - Human Machine Interface
+- rule_id: EXCEPT_NA:209:1
+  region_scope: EXCEPT_NA
+  spec_id: '209'
+  spec_type: HMI
+  spec_subtype: HMI_ANIMATION
+  name_keywords:
+  - Animation Spec
+  - アニメーション仕様
+  - HMI
+  - Human Machine Interface
+- rule_id: EXCEPT_NA:210:1
+  region_scope: EXCEPT_NA
+  spec_id: '210'
+  spec_type: HMI
+  spec_subtype: HMI_ALERT
+  name_keywords:
+  - Alert HMI
+  - HMI
+  - Human Machine Interface
+  - Alert HMI仕様書 Alert HMI Spec
+- rule_id: EXCEPT_NA:211:1
+  region_scope: EXCEPT_NA
+  spec_id: '211'
+  spec_type: HMI
+  spec_subtype: HMI_USER_PROFILE
+  name_keywords:
+  - User Profile HMI
+  - HMI
+  - Human Machine Interface
+  - User Profile HMI仕様書 User Profile HMI Spec
+- rule_id: EXCEPT_NA:212:1
+  region_scope: EXCEPT_NA
+  spec_id: '212'
+  spec_type: HMI
+  spec_subtype: HMI_NAVIGATION
+  name_keywords:
+  - Navigation HMI
+  - HMI
+  - Human Machine Interface
+  - Navigation HMI仕様書 Navigation HMI Spec
+- rule_id: EXCEPT_NA:213:1
+  region_scope: EXCEPT_NA
+  spec_id: '213'
+  spec_type: HMI
+  spec_subtype: HMI_MEDIA
+  name_keywords:
+  - Media HMI
+  - HMI
+  - Human Machine Interface
+  - Media HMI仕様書 Media HMI Spec
+- rule_id: EXCEPT_NA:214:1
+  region_scope: EXCEPT_NA
+  spec_id: '214'
+  spec_type: HMI
+  name_keywords:
+  - HMI
+  - Human Machine Interface
+  - IP Apps HMI仕様書 IP Apps HMI Spec
+- rule_id: EXCEPT_NA:215:1
+  region_scope: EXCEPT_NA
+  spec_id: '215'
+  spec_type: HMI
+  spec_subtype: HMI_PHONE
+  name_keywords:
+  - Phone HMI
+  - HMI
+  - Human Machine Interface
+  - Phone HMI仕様書 Phone HMI Spec
+- rule_id: EXCEPT_NA:216:1
+  region_scope: EXCEPT_NA
+  spec_id: '216'
+  spec_type: HMI
+  spec_subtype: HMI_OTA
+  name_keywords:
+  - OTA HMI
+  - HMI
+  - Human Machine Interface
+  - OTA HMI仕様書 OTA HMI Spec
+- rule_id: EXCEPT_NA:221:1
+  region_scope: EXCEPT_NA
+  spec_id: '221'
+  spec_type: HMI
+  spec_subtype: HMI_AACN
+  name_keywords:
+  - AACN HMI
+  - ACCN HMI
+  - HMI
+  - Human Machine Interface
+- rule_id: EXCEPT_NA:223:1
+  region_scope: EXCEPT_NA
+  spec_id: '223'
+  spec_type: HMI
+  spec_subtype: HMI_SYSTEM
+  name_keywords:
+  - System HMI
+  - HMI
+  - Human Machine Interface
+  - System HMI仕様書 System HMI Spec
+- rule_id: EXCEPT_NA:224:1
+  region_scope: EXCEPT_NA
+  spec_id: '224'
+  spec_type: HMI
+  spec_subtype: HMI_VOICE_AGENT
+  name_keywords:
+  - Voice Agent HMI
+  - HMI
+  - Human Machine Interface
+  - Voice Agent HMI仕様書 Voice Agent HMI Spec
+- rule_id: EXCEPT_NA:225:1
+  region_scope: EXCEPT_NA
+  spec_id: '225'
+  spec_type: HMI
+  spec_subtype: HMI_UNIVERSAL_SEARCH
+  name_keywords:
+  - Universal Search HMI
+  - HMI
+  - Human Machine Interface
+  - Universal Search HMI仕様書 Universal Search HMI Spec
+- rule_id: EXCEPT_NA:226:1
+  region_scope: EXCEPT_NA
+  spec_id: '226'
+  spec_type: HMI
+  spec_subtype: HMI_REMOTE_SERVICE
+  name_keywords:
+  - Remote Service HMI
+  - HMI
+  - Human Machine Interface
+  - Remote Service HMI仕様書 Remote Service HMI Spec
+- rule_id: EXCEPT_NA:227:1
+  region_scope: EXCEPT_NA
+  spec_id: '227'
+  spec_type: HMI
+  spec_subtype: HMI_VEHICLE_INTEGRATION
+  name_keywords:
+  - Vehicle Integration HMI
+  - Vhicle Integration HMI
+  - HMI
+  - Human Machine Interface
+- rule_id: EXCEPT_NA:229:1
+  region_scope: EXCEPT_NA
+  spec_id: '229'
+  spec_type: HMI
+  spec_subtype: HMI_ALLWORDS
+  name_keywords:
+  - AllWords
+  - HMI
+  - Human Machine Interface
+  - Allwords仕様書 AllWords Spec
+- rule_id: EXCEPT_NA:230:1
+  region_scope: EXCEPT_NA
+  spec_id: '230'
+  spec_type: HMI
+  spec_subtype: HMI_NAVIGATION
+  name_keywords:
+  - Navigation HMI
+  - HMI
+  - Human Machine Interface
+  - Navigation HMI仕様書 Navigation HMI Spec
+- rule_id: EXCEPT_NA:253:1
+  region_scope: EXCEPT_NA
+  spec_id: '253'
+  spec_type: HMI
+  name_keywords:
+  - HMI
+  - Human Machine Interface
+  - 中国エージェントHMI仕様書 China Agent HMI Spec
+- rule_id: EXCEPT_NA:254:1
+  region_scope: EXCEPT_NA
+  spec_id: '254'
+  spec_type: HMI
+  spec_subtype: HMI_VUI
+  name_keywords:
+  - VUI HMI
+  - HMI
+  - Human Machine Interface
+  - 中国VUI HMI差分仕様書 China VUI HMI difference Spec
+- rule_id: EXCEPT_NA:255:1
+  region_scope: EXCEPT_NA
+  spec_id: '255'
+  spec_type: HMI
+  spec_subtype: HMI_VUI
+  name_keywords:
+  - VUI HMI
+  - HMI
+  - Human Machine Interface
+  - VUI HMI仕様書 VUI HMI Spec
+- rule_id: EXCEPT_NA:273:1
+  region_scope: EXCEPT_NA
+  spec_id: '273'
+  spec_type: HMI
+  spec_subtype: HMI_AIR_CONDITIONER
+  name_keywords:
+  - Air Conditioner HMI
+  - エアコンHMI
+  - HMI
+  - Human Machine Interface
+- rule_id: EXCEPT_NA:275:1
+  region_scope: EXCEPT_NA
+  spec_id: '275'
+  spec_type: HMI
+  spec_subtype: HMI_VEHICLE_SETTINGS
+  name_keywords:
+  - Vehicle settings HMI
+  - 車両系設定HMI
+  - HMI
+  - Human Machine Interface
+- rule_id: EXCEPT_NA:276:1
+  region_scope: EXCEPT_NA
+  spec_id: '276'
+  spec_type: HMI
+  spec_subtype: HMI_AIS_COCKPIT
+  name_keywords:
+  - Ais-Cockpit Area HMI
+  - HMI
+  - Human Machine Interface
+  - Ais-Cockpit専用エリアHMI仕様書 Ais-Cockpit Area HMI Spec
+- rule_id: EXCEPT_NA:320:1
+  region_scope: EXCEPT_NA
+  spec_id: '320'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_ARL
+  name_keywords:
+  - Navi ARL
+  - Navigation ARL
+  - Navigation Function
+  - Navigation
+- rule_id: EXCEPT_NA:380:1
+  region_scope: EXCEPT_NA
+  spec_id: '380'
+  spec_type: ETC_DSRC
+  name_keywords:
+  - ETC DSRC
+  - ETC-DSRC
+  - ETC DSRC ARL仕様書 ETC DSRC ARL Spec
+- rule_id: EXCEPT_NA:394:1
+  region_scope: EXCEPT_NA
+  spec_id: '394'
+  spec_type: AUDIO
+  name_keywords:
+  - Audio Function
+  - Audio
+  - 用品サウンドシステムARL Accessory Retrofit Sound System ARL
+- rule_id: EXCEPT_NA:405:1
+  region_scope: EXCEPT_NA
+  spec_id: '405'
+  spec_type: SEARCH
+  spec_subtype: SEARCH_SEQUENCE
+  name_keywords:
+  - Universal Search sequence
+  - Universal Search
+  - Search Communication
+  - ユニバーサルサーチ シーケンス仕様書 Universal Search sequence Spec
+- rule_id: EXCEPT_NA:408:1
+  region_scope: EXCEPT_NA
+  spec_id: '408'
+  spec_type: USER_PROFILE
+  spec_subtype: USER_PROFILE_SEQUENCE
+  name_keywords:
+  - User Profile Sequence
+  - User Profile
+  - 個人特定システム
+  - 個人特定システム シーケンス仕様書 User Profile Sequence Spec
+- rule_id: EXCEPT_NA:492:1
+  region_scope: EXCEPT_NA
+  spec_id: '492'
+  spec_type: DATA_COLLECTION
+  name_keywords:
+  - Market Data Collection
+  - Data Collection
+  - 市場データ収集 シーケンス仕様書 Market Data Collection Sequence Spec
+- rule_id: EXCEPT_NA:495:1
+  region_scope: EXCEPT_NA
+  spec_id: '495'
+  spec_type: CAMERA
+  name_keywords:
+  - Camera Image
+  - Camera
+  - EDER画像データ収集 シーケンス仕様書【日本】 EDER Visual Data Collecting Sequence Spec【JP】
+- rule_id: EXCEPT_NA:497:1
+  region_scope: EXCEPT_NA
+  spec_id: '497'
+  spec_type: CAMERA
+  name_keywords:
+  - Camera Image
+  - Camera
+  - カメラ映像記録サービスシーケンス仕様書 Camera Image Recording Service Sequence Spec
+- rule_id: EXCEPT_NA:501:1
+  region_scope: EXCEPT_NA
+  spec_id: '501'
+  spec_type: HMI
+  spec_subtype: HMI_SYSTEM
+  name_keywords:
+  - System HMI
+  - HMI
+  - Human Machine Interface
+  - HMI操作履歴収集システム仕様書 HMI operation history collecting system Spec
+- rule_id: EXCEPT_NA:505:1
+  region_scope: EXCEPT_NA
+  spec_id: '505'
+  spec_type: SEARCH
+  spec_subtype: SEARCH_UNIVERSAL_SEARCH
+  name_keywords:
+  - Universal Search Function
+  - Universal Search
+  - Search Communication
+  - ユニバーサルサーチ 機能仕様書 Universal Search function Spec
+- rule_id: EXCEPT_NA:508:1
+  region_scope: EXCEPT_NA
+  spec_id: '508'
+  spec_type: USER_PROFILE
+  spec_subtype: USER_PROFILE_FUNCTION
+  name_keywords:
+  - User Profile function Spec
+  - User Profile
+  - 個人特定システム
+  - 個人特定システム 機能仕様書 User Profile function Spec
+- rule_id: EXCEPT_NA:511:1
+  region_scope: EXCEPT_NA
+  spec_id: '511'
+  spec_type: SETTINGS
+  name_keywords:
+  - Settings Function
+  - 設定機能仕様
+  - 設定機能仕様書 Settings Function Spec
+- rule_id: EXCEPT_NA:512:1
+  region_scope: EXCEPT_NA
+  spec_id: '512'
+  spec_type: DIAGNOSTIC
+  name_keywords:
+  - Diagnostic
+  - ダイアグ
+  - ダイアグ機能仕様書 Diagnostic Functional Spec
+- rule_id: EXCEPT_NA:513:1
+  region_scope: EXCEPT_NA
+  spec_id: '513'
+  spec_type: DIAGNOSTIC
+  name_keywords:
+  - Diagnostic
+  - ダイアグ
+  - MM ダイアグCAN仕様書 MM Diagnostic CAN Spec
+- rule_id: EXCEPT_NA:514:1
+  region_scope: EXCEPT_NA
+  spec_id: '514'
+  spec_type: DIAGNOSTIC
+  name_keywords:
+  - Diagnostic
+  - ダイアグ
+  - ダイアグレコーダ機能仕様書 Diagnostic Recorder Function
+- rule_id: EXCEPT_NA:515:1
+  region_scope: EXCEPT_NA
+  spec_id: '515'
+  spec_type: REPROGRAM
+  name_keywords:
+  - Reprogram
+  - Reprogramming
+  - リプログラム 機能仕様書 Reprogram Function
+- rule_id: EXCEPT_NA:517:1
+  region_scope: EXCEPT_NA
+  spec_id: '517'
+  spec_type: AUDIO
+  name_keywords:
+  - Audio Function
+  - Audio
+  - サウンドビープ仕様書 Sound beep Spec
+- rule_id: EXCEPT_NA:519:1
+  region_scope: EXCEPT_NA
+  spec_id: '519'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_SERVICE
+  name_keywords:
+  - Navi Service
+  - Navigation Service
+  - Navigation Function
+  - Navigation
+- rule_id: EXCEPT_NA:520:1
+  region_scope: EXCEPT_NA
+  spec_id: '520'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_SERVICE
+  name_keywords:
+  - Navi Service
+  - Navigation Service
+  - Navigation Function
+  - Navigation
+- rule_id: EXCEPT_NA:522:1
+  region_scope: EXCEPT_NA
+  spec_id: '522'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_SERVICE
+  name_keywords:
+  - Navi Service
+  - Navigation Service
+  - Navigation Function
+  - Navigation
+- rule_id: EXCEPT_NA:524:1
+  region_scope: EXCEPT_NA
+  spec_id: '524'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_SERVICE
+  name_keywords:
+  - Navi Service
+  - Navigation Service
+  - Navigation Function
+  - Navigation
+- rule_id: EXCEPT_NA:526:1
+  region_scope: EXCEPT_NA
+  spec_id: '526'
+  spec_type: DIGITAL_KEY
+  name_keywords:
+  - Digital key
+  - デジタルキー
+  - デジタルキー機能仕様書 Digital key function Spec
+- rule_id: EXCEPT_NA:529:1
+  region_scope: EXCEPT_NA
+  spec_id: '529'
+  spec_type: SETTINGS
+  name_keywords:
+  - Settings Function
+  - 設定機能仕様
+  - 先進安全設定要求仕様書 ADAS settings function Spec
+- rule_id: EXCEPT_NA:530:1
+  region_scope: EXCEPT_NA
+  spec_id: '530'
+  spec_type: AUDIO
+  name_keywords:
+  - Audio Function
+  - Audio
+  - Audio機能仕様書 Audio function Spec
+- rule_id: EXCEPT_NA:531:1
+  region_scope: EXCEPT_NA
+  spec_id: '531'
+  spec_type: AUDIO
+  spec_subtype: CONNECTED_RADIO
+  name_keywords:
+  - Connected Radio
+  - Audio Function
+  - Audio
+  - Connected Radio機能仕様書(米 欧 豪) Connected Radio function Spec(NA EU AU)
+- rule_id: EXCEPT_NA:532:1
+  region_scope: EXCEPT_NA
+  spec_id: '532'
+  spec_type: AUDIO
+  spec_subtype: AUDIO_PERFORMANCE
+  name_keywords:
+  - Audio Performance
+  - オーディオ性能
+  - Audio Function
+  - Audio
+- rule_id: EXCEPT_NA:533:1
+  region_scope: EXCEPT_NA
+  spec_id: '533'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_SERVICE
+  name_keywords:
+  - Navi Service
+  - Navigation Service
+  - Navigation Function
+  - Navigation
+- rule_id: EXCEPT_NA:534:1
+  region_scope: EXCEPT_NA
+  spec_id: '534'
+  spec_type: HMI
+  spec_subtype: HMI_NAVIGATION
+  name_keywords:
+  - Navigation HMI
+  - HMI
+  - Human Machine Interface
+  - 運転支援サービス要求仕様書（HMI用ナビ連携）
+- rule_id: EXCEPT_NA:535:1
+  region_scope: EXCEPT_NA
+  spec_id: '535'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_SERVICE
+  name_keywords:
+  - Navi Service
+  - Navigation Service
+  - Navigation Function
+  - Navigation
+- rule_id: EXCEPT_NA:538:1
+  region_scope: EXCEPT_NA
+  spec_id: '538'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_SERVICE
+  name_keywords:
+  - Navi Service
+  - Navigation Service
+  - Navigation Function
+  - Navigation
+- rule_id: EXCEPT_NA:539:1
+  region_scope: EXCEPT_NA
+  spec_id: '539'
+  spec_type: AUDIO
+  spec_subtype: CONNECTED_AUDIO
+  name_keywords:
+  - ConnectedAudio Function
+  - Connected Audio function
+  - Audio Function
+  - Audio
+- rule_id: EXCEPT_NA:539:2
+  region_scope: EXCEPT_NA
+  spec_id: '539'
+  spec_type: AUDIO
+  spec_subtype: CONNECTED_AUDIO
+  name_keywords:
+  - ConnectedAudio Function
+  - Connected Audio function
+  - Audio Function
+  - Audio
+- rule_id: EXCEPT_NA:540:1
+  region_scope: EXCEPT_NA
+  spec_id: '540'
+  spec_type: WIFI
+  name_keywords:
+  - Wi-Fi Function
+  - WiFi Function
+  - Wi-Fi機能仕様書 Wi-Fi Function Spec
+- rule_id: EXCEPT_NA:541:1
+  region_scope: EXCEPT_NA
+  spec_id: '541'
+  spec_type: WIFI
+  spec_subtype: WIFI_HOTSPOT
+  name_keywords:
+  - Wi-Fi Hotspot
+  - WiFi Hotspot
+  - Wi-Fi Function
+  - WiFi Function
+- rule_id: EXCEPT_NA:542:1
+  region_scope: EXCEPT_NA
+  spec_id: '542'
+  spec_type: BT
+  name_keywords:
+  - Bluetooth Function
+  - Bluetooth Specification
+  - Bluetooth 機能仕様書 Bluetooth Function Spec
+- rule_id: EXCEPT_NA:543:1
+  region_scope: EXCEPT_NA
+  spec_id: '543'
+  spec_type: HANDSFREE
+  name_keywords:
+  - Handsfree Function
+  - Handsfree
+  - Handsfree 機能仕様書 Handsfree Function Spec
+- rule_id: EXCEPT_NA:544:1
+  region_scope: EXCEPT_NA
+  spec_id: '544'
+  spec_type: MIRACAST
+  name_keywords:
+  - Miracast
+  - Miracast 機能仕様書 Miracast Functional Spec
+- rule_id: EXCEPT_NA:546:1
+  region_scope: EXCEPT_NA
+  spec_id: '546'
+  spec_type: SMART_DEVICE_LINK
+  name_keywords:
+  - SmartDeviceLink
+  - SDL
+  - SmartDeviceLink(SDL)機能仕様書 SmartDeviceLink(SDL)function Spec
+- rule_id: EXCEPT_NA:547:1
+  region_scope: EXCEPT_NA
+  spec_id: '547'
+  spec_type: CARPLAY
+  name_keywords:
+  - CarPlay
+  - CarPlay 機能仕様書 CarPlay Function Spec
+- rule_id: EXCEPT_NA:548:1
+  region_scope: EXCEPT_NA
+  spec_id: '548'
+  spec_type: CARLIFE
+  name_keywords:
+  - CarLife
+  - CarLife 機能仕様書 CarLife Function Spec
+- rule_id: EXCEPT_NA:549:1
+  region_scope: EXCEPT_NA
+  spec_id: '549'
+  spec_type: ANDROID_AUTO
+  name_keywords:
+  - Android Auto
+  - Android Auto機能仕様書 Android auto Function Spec
+- rule_id: EXCEPT_NA:550:1
+  region_scope: EXCEPT_NA
+  spec_id: '550'
+  spec_type: BT
+  spec_subtype: BLUETOOTH_AUDIO
+  name_keywords:
+  - Bluetooth Audio Function
+  - Bluetooth Audio
+  - Bluetooth Function
+  - Bluetooth Specification
+- rule_id: EXCEPT_NA:551:1
+  region_scope: EXCEPT_NA
+  spec_id: '551'
+  spec_type: MOBILE_DEVICE_MANAGEMENT
+  name_keywords:
+  - Mobile Device Management
+  - モバイルデバイスマネジメント
+  - モバイルデバイスマネジメント機能仕様書 Mobile Device Management Function Spec
+- rule_id: EXCEPT_NA:552:1
+  region_scope: EXCEPT_NA
+  spec_id: '552'
+  spec_type: WELINK
+  name_keywords:
+  - WeLink
+  - WeLink 機能仕様書 WeLink Function Spec
+- rule_id: EXCEPT_NA:553:1
+  region_scope: EXCEPT_NA
+  spec_id: '553'
+  spec_type: AGENT
+  name_keywords:
+  - Agent Guideline
+  - Agent Function
+  - 中国エージェント機能仕様書 China Agent Function Spec
+- rule_id: EXCEPT_NA:554:1
+  region_scope: EXCEPT_NA
+  spec_id: '554'
+  spec_type: VUI
+  name_keywords:
+  - VUI Function
+  - VUI
+  - 中国VUI 機能差分仕様書 China VUI Function difference Spec
+- rule_id: EXCEPT_NA:555:1
+  region_scope: EXCEPT_NA
+  spec_id: '555'
+  spec_type: VUI
+  name_keywords:
+  - VUI Function
+  - VUI
+  - VUI 機能仕様書 VUI Function Spec
+- rule_id: EXCEPT_NA:556:1
+  region_scope: EXCEPT_NA
+  spec_id: '556'
+  spec_type: HANDSFREE
+  name_keywords:
+  - Handsfree Function
+  - Handsfree
+  - ハンズフリー音質性能要求仕様書 Handsfree Sound Quality Performance Requirement Spec
+- rule_id: EXCEPT_NA:564:1
+  region_scope: EXCEPT_NA
+  spec_id: '564'
+  spec_type: CAMERA
+  name_keywords:
+  - Camera Image
+  - Camera
+  - 周辺監視カメラシステム機能仕様書 Peripheral Monitoring Camera System Function Spec
+- rule_id: EXCEPT_NA:570:1
+  region_scope: EXCEPT_NA
+  spec_id: '570'
+  spec_type: AUDIO
+  name_keywords:
+  - Audio Function
+  - Audio
+  - ASC 音制御機能仕様書 ASC sound control function specification
+- rule_id: EXCEPT_NA:576:1
+  region_scope: EXCEPT_NA
+  spec_id: '576'
+  spec_type: SETTINGS
+  name_keywords:
+  - Settings Function
+  - 設定機能仕様
+  - 車両系設定詳細機能仕様書 Vehicle settings Function Spec
+- rule_id: EXCEPT_NA:580:1
+  region_scope: EXCEPT_NA
+  spec_id: '580'
+  spec_type: ETC_DSRC
+  name_keywords:
+  - ETC DSRC
+  - ETC-DSRC
+  - ETCDSRCサービス要件書 ETC-DSRC Survice Requirement Spec
+- rule_id: EXCEPT_NA:581:1
+  region_scope: EXCEPT_NA
+  spec_id: '581'
+  spec_type: ETC_DSRC
+  name_keywords:
+  - ETC DSRC
+  - ETC-DSRC
+  - ETC DSRCシステム仕様書 ETC DSRC System Spec
+- rule_id: EXCEPT_NA:584:1
+  region_scope: EXCEPT_NA
+  spec_id: '584'
+  spec_type: ETC_DSRC
+  name_keywords:
+  - ETC DSRC
+  - ETC-DSRC
+  - ETC情報機能仕様書 ETC Information Function Spec
+- rule_id: EXCEPT_NA:585:1
+  region_scope: EXCEPT_NA
+  spec_id: '585'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_FUNCTION
+  name_keywords:
+  - Navigation Function Spec
+  - Navigation Function
+  - Navigation
+  - ETC DSRCナビ連携機能仕様書 ETC DSRC Navi Cooperation Function Spec
+- rule_id: EXCEPT_NA:589:1
+  region_scope: EXCEPT_NA
+  spec_id: '589'
+  spec_type: NAVIGATION
+  spec_subtype: NAVIGATION_FUNCTION
+  name_keywords:
+  - Navigation Function Spec
+  - Navigation Function
+  - Navigation
+  - 高度化光対応DSRCナビ連携機能仕様書 DSRC Navi Cooperation Function Spec for Advancement optical system
+- rule_id: EXCEPT_NA:592:1
+  region_scope: EXCEPT_NA
+  spec_id: '592'
+  spec_type: DATA_COLLECTION
+  name_keywords:
+  - Market Data Collection
+  - Data Collection
+  - 市場データ収集 機能要求仕様書 Market Data Collection Function Requirement Spec
+- rule_id: EXCEPT_NA:594:1
+  region_scope: EXCEPT_NA
+  spec_id: '594'
+  spec_type: AUDIO
+  name_keywords:
+  - Audio Function
+  - Audio
+  - 用品サウンドシステム詳細機能仕様書 Accessory Retrofit Sound System function Spec
+- rule_id: EXCEPT_NA:595:1
+  region_scope: EXCEPT_NA
+  spec_id: '595'
+  spec_type: CAMERA
+  name_keywords:
+  - Camera Image
+  - Camera
+  - EDER画像データ収集 機能要件仕様書【日本】 EDER Visual Data Collecting Function Spec【JP】
+- rule_id: EXCEPT_NA:596:1
+  region_scope: EXCEPT_NA
+  spec_id: '596'
+  spec_type: CAMERA
+  name_keywords:
+  - Camera Image
+  - Camera
+  - カメラ映像情報活用機能仕様書 Camera Image Data Utilization Function Spec
+- rule_id: EXCEPT_NA:597:1
+  region_scope: EXCEPT_NA
+  spec_id: '597'
+  spec_type: CAMERA
+  name_keywords:
+  - Camera Image
+  - Camera
+  - カメラ映像記録サービス機能仕様書 Camera Image Recording Service Function Spec
+- rule_id: EXCEPT_NA:608:1
+  region_scope: EXCEPT_NA
+  spec_id: '608'
+  spec_type: REMOTE_SERVICE
+  name_keywords:
+  - Remote Service
+  - RemoteServices
+  - ◆Delete◆リモートサービスARL仕様書 RemoteServices ARL Spec
+- rule_id: EXCEPT_NA:608:2
+  region_scope: EXCEPT_NA
+  spec_id: '608'
+  spec_type: REMOTE_SERVICE
+  name_keywords:
+  - Remote Service
+  - RemoteServices
+  - リモートサービスARL仕様書 RemoteServices ARL Spec
+- rule_id: EXCEPT_NA:700:1
+  region_scope: EXCEPT_NA
+  spec_id: '700'
+  spec_type: APPLICATION_DELIVERY
+  name_keywords:
+  - Application Delivery System
+  - 配信アプリシステム
+  - 配信アプリシステム概要仕様書 Application Delivery System Outline Explanation
+- rule_id: EXCEPT_NA:701:1
+  region_scope: EXCEPT_NA
+  spec_id: '701'
+  spec_type: APPLICATION_DELIVERY
+  name_keywords:
+  - Application Delivery System
+  - 配信アプリシステム
+  - 配信アプリシステム機能仕様書 Application Delivery System Function Spec
+- rule_id: EXCEPT_NA:702:1
+  region_scope: EXCEPT_NA
+  spec_id: '702'
+  spec_type: APPLICATION_DELIVERY
+  name_keywords:
+  - Application Delivery System
+  - 配信アプリシステム
+  - 配信アプリシステムIF設計仕様書 Application Delivery System IF Architecture Spec
+- rule_id: EXCEPT_NA:704:1
+  region_scope: EXCEPT_NA
+  spec_id: '704'
+  spec_type: TELEMATICS
+  name_keywords:
+  - Telematics
+  - Telematicsメニュー機能仕様書 Telematics Menu Function Spec
+- rule_id: EXCEPT_NA:706:1
+  region_scope: EXCEPT_NA
+  spec_id: '706'
+  spec_type: WEB_BROWSER
+  spec_subtype: WEB_BROWSER_FUNCTION
+  name_keywords:
+  - Web Browser Function
+  - Web Browser
+  - WEBブラウザ機能仕様書 WEB Browser Function Spec
+- rule_id: EXCEPT_NA:707:1
+  region_scope: EXCEPT_NA
+  spec_id: '707'
+  spec_type: COMMUNICATION
+  name_keywords:
+  - Communication Spec
+  - 通信仕様
+  - DCM USB通信仕様書 DCM USB Communication Spec
+- rule_id: EXCEPT_NA:708:1
+  region_scope: EXCEPT_NA
+  spec_id: '708'
+  spec_type: REMOTE_SERVICE
+  name_keywords:
+  - Remote Service
+  - RemoteServices
+  - リモートサービス機能仕様書 RemoteServices Requirement Spec
+- rule_id: EXCEPT_NA:710:1
+  region_scope: EXCEPT_NA
+  spec_id: '710'
+  spec_type: VEHICLE_DATA
+  name_keywords:
+  - Vehicle probe data
+  - Vehicles probe data
+  - 車両プローブデータアップロード機能要求仕様書 Vehicles probe data upload function requirement Spec
+- rule_id: EXCEPT_NA:712:1
+  region_scope: EXCEPT_NA
+  spec_id: '712'
+  spec_type: VEHICLE_DATA
+  name_keywords:
+  - Vehicle probe data
+  - Vehicles probe data
+  - 車両プローブデータ通信仕様書 Vehicles probe data communication function Spec
+- rule_id: EXCEPT_NA:713:1
+  region_scope: EXCEPT_NA
+  spec_id: '713'
+  spec_type: VEHICLE_DATA
+  name_keywords:
+  - Vehicle probe data
+  - Vehicles probe data
+  - ◆Delete◆車両プローブデータ（収集・蓄積）仕様書 Vehicles probe data collection Spec
+- rule_id: EXCEPT_NA:714:1
+  region_scope: EXCEPT_NA
+  spec_id: '714'
+  spec_type: VEHICLE_DATA
+  name_keywords:
+  - Vehicle probe data
+  - Vehicles probe data
+  - ◆Delete◆車両プローブデータ処理仕様書 Vehicles probe data processing Spec
+- rule_id: EXCEPT_NA:724:1
+  region_scope: EXCEPT_NA
+  spec_id: '724'
+  spec_type: REPROGRAM
+  name_keywords:
+  - Reprogram
+  - Reprogramming
+  - DCM USBリプロ要求仕様書 DCM USB Reprogramming Requirement Spec
+- rule_id: EXCEPT_NA:A100:1
+  region_scope: EXCEPT_NA
+  spec_id: A100
+  spec_type: AGENT
+  name_keywords:
+  - Agent Guideline
+  - Agent Function
+  - エージェントガイドライン Agent Guideline
+- rule_id: EXCEPT_NA:A103:1
+  region_scope: EXCEPT_NA
+  spec_id: A103
+  spec_type: AGENT
+  name_keywords:
+  - Agent Guideline
+  - Agent Function
+  - エージェントデータアップローダ 機能詳細仕様書 Agent Data Uploader Agent
+- rule_id: EXCEPT_NA:A415:1
+  region_scope: EXCEPT_NA
+  spec_id: A415
+  spec_type: AGENT
+  name_keywords:
+  - Agent Guideline
+  - Agent Function
+  - 道路状況画像案内 シーケンス仕様書 Road Events Visual Guidance Sequence Agent
+- rule_id: EXCEPT_NA:A505:1
+  region_scope: EXCEPT_NA
+  spec_id: A505
+  spec_type: AGENT
+  name_keywords:
+  - Agent Guideline
+  - Agent Function
+  - エージェント A to A 連携機能仕様書 Agent to agent function specificatioon
+- rule_id: EXCEPT_NA:A515:1
+  region_scope: EXCEPT_NA
+  spec_id: A515
+  spec_type: CAMERA
+  name_keywords:
+  - Camera Image
+  - Camera
+  - 道路状況画像案内 機能仕様書 Road Events Visual Guidance Function Spec
+- rule_id: EXCEPT_NA:705:1
+  region_scope: EXCEPT_NA
+  spec_id: '705'
+  spec_type: OPERATOR_SERVICE
+  name_keywords:
+  - Operator Service
+  - オペレーターサービス

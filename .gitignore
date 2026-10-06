@@ -1,0 +1,92 @@
+﻿# =========================
+# Python
+# =========================
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+
+# =========================
+# IDE
+# =========================
+
+.vscode/
+.idea/
+
+# =========================
+# Runtime directories
+# 保留目录，只忽略目录内实际内容
+# =========================
+
+input/*
+!input/.gitkeep
+
+output/*
+!output/.gitkeep
+
+logs/*
+!logs/.gitkeep
+
+# =========================
+# Environment
+# =========================
+
+.env
+.env.*
+!.env.example
+
+# =========================
+# Test / Cache
+# =========================
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# =========================
+# Logs / Temporary files
+# =========================
+
+*.log
+*.tmp
+~$*
+
+# =========================
+# PyInstaller
+# =========================
+
+build/
+dist/
+
+# =========================
+# OS
+# =========================
+
+.DS_Store
+Thumbs.db
+# ===== Local / Build Artifacts =====
+.venv/
+.venv-build/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.build-temp/
+build/
+dist/
+release/
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets
+.env
+.env.*
+!.env.example

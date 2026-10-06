@@ -1,0 +1,424 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://document-intelligence.local/schemas/qabug-rag-document-v1.json",
+  "title": "Enterprise QA/BUG RAG Canonical Document",
+  "description": "Lossless canonical interchange contract for QA/Jira and BUG/Jira records. PostgreSQL remains authoritative; Qdrant chunks are derived retrieval state.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "document_type",
+    "identity",
+    "source",
+    "structured_metadata",
+    "normalized_fields",
+    "content_sections",
+    "relations",
+    "provenance",
+    "hashes",
+    "embedding_metadata",
+    "quality_flags",
+    "queryable",
+    "acl",
+    "raw_record",
+    "custom_fields",
+    "chunks"
+  ],
+  "$defs": {
+    "nullableString": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "contentSection": {
+      "type": "object",
+      "required": [
+        "section_type",
+        "source_field",
+        "content"
+      ],
+      "properties": {
+        "section_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source_field": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "qualityFlag": {
+      "type": "object",
+      "required": [
+        "severity",
+        "code",
+        "message"
+      ],
+      "properties": {
+        "severity": {
+          "type": "string",
+          "enum": [
+            "INFO",
+            "WARN",
+            "WARNING",
+            "ERROR",
+            "CRITICAL"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "chunk": {
+      "type": "object",
+      "required": [
+        "point_id",
+        "chunk_key",
+        "section_type",
+        "section_order",
+        "content",
+        "content_hash",
+        "index_hash",
+        "payload"
+      ],
+      "properties": {
+        "point_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "chunk_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "section_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "section_order": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "index_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "document_type": {
+      "enum": [
+        "QA",
+        "BUG"
+      ]
+    },
+    "identity": {
+      "type": "object",
+      "required": [
+        "record_key",
+        "issue_key",
+        "issue_id",
+        "parent_issue_id",
+        "project_key"
+      ],
+      "properties": {
+        "record_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "issue_key": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "issue_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "parent_issue_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "project_key": {
+          "$ref": "#/$defs/nullableString"
+        }
+      },
+      "additionalProperties": true
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "file_name",
+        "source_format",
+        "source_identity",
+        "expected_column_count",
+        "source_column_count",
+        "column_count_match"
+      ],
+      "properties": {
+        "file_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_format": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sheet_name": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "row_number": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "source_identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_column_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source_column_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "column_count_match": {
+          "type": "boolean"
+        },
+        "repair_info": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "structured_metadata": {
+      "type": "object",
+      "required": [
+        "status_norm",
+        "priority_norm",
+        "resolution_norm"
+      ],
+      "properties": {
+        "status_norm": {
+          "type": "string",
+          "minLength": 1
+        },
+        "priority_norm": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolution_norm": {
+          "type": "string",
+          "minLength": 1
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "normalized_fields": {
+      "type": "object"
+    },
+    "content_sections": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/contentSection"
+      }
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "relation_type": {
+            "type": "string"
+          },
+          "target_issue_key": {
+            "type": "string"
+          },
+          "source_field": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "source_fields",
+        "raw_record_preserved",
+        "normalization",
+        "quarantine_policy"
+      ],
+      "properties": {
+        "source_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "raw_record_preserved": {
+          "const": true
+        },
+        "normalization": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quarantine_policy": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "hashes": {
+      "type": "object",
+      "required": [
+        "source_hash",
+        "content_hash",
+        "index_hash"
+      ],
+      "properties": {
+        "source_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "index_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "additionalProperties": false
+    },
+    "embedding_metadata": {
+      "type": "object",
+      "required": [
+        "model",
+        "version",
+        "dimension",
+        "distance",
+        "collection"
+      ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dimension": {
+          "type": "integer",
+          "const": 1024
+        },
+        "distance": {
+          "type": "string",
+          "const": "Cosine"
+        },
+        "collection": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "quality_flags": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/qualityFlag"
+      }
+    },
+    "queryable": {
+      "type": "boolean"
+    },
+    "acl": {
+      "type": "object",
+      "required": [
+        "classification",
+        "allowed_groups",
+        "policy_version"
+      ],
+      "properties": {
+        "classification": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowed_groups": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "policy_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "raw_record": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "custom_fields": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "chunks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/chunk"
+      }
+    }
+  },
+  "additionalProperties": true
+}

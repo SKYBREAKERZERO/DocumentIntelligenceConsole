@@ -1,0 +1,87 @@
+Specification taxonomy v1 - first-pass unresolved / review list
+
+These entries were intentionally not assigned by an exact catalog rule in the
+first pass because the directory name alone did not provide a sufficiently
+safe broad classification under the current taxonomy.
+
+They may still match a generic filename keyword at runtime. Review these
+entries before adding new exact rules. Do not classify by document body alone.
+
+- 0000_TBDList
+- 000_Documents
+- 101_共通アプリ仕様書_Common application Spec
+- 102_Smart Stop 電流制限要求仕様_Smartstop current Limit Spec
+- 103_調停フレームワーク仕様書_Arbitration Framework Spec
+- 104_T-AGL仕様書_T-AGL Spec Document
+- 105_デバッグモード機能仕様書_Debug mode Spec
+- 114_MMパネル設計ガイドライン_Panel Design Guideline
+- 116_車両個別パラメータ選択項目仕様書_Vehicle individual parameter Spec
+- 121_別体Display機能仕様書_External Display Function Spec
+- 133_リピーター付USBアダプタ仕様書_USB-Adapter with Repeater Spec
+- 136_韓国差分仕様書 [韓国]_Korea difference Spec[KR]
+- 137_ダミーMEU仕様書 [韓国]_Dummy MEU Spec[KR]
+- 139_OEM delta
+- 151_AVC-LAN STEP1仕様書_AVC-LAN STEP1 Spec
+- 152_AVC-LAN STEP3仕様書_AVC-LAN STEP3 Spec
+- 153_Step1-3コマンドガイド仕様書_Step1-3 Command Guide Spec
+- 154_Step1-3シーケンス仕様書_Step1-3 Sequence Spec
+- 156_メータ×マルチメディア連携 要求仕様_Meter-Multimedia coordination requirement Spec
+- 157_特殊伝送路仕様書_ Wire Harness Spec for Specific Use
+- 170_外部アンプEQ切替要求仕様書_External AMP EQ switching requirement Spec
+- 180_DSRC　USBデバイス仕様書 [日本]_DSRC-USB Device Spec [JP]
+- 182_DSRCアプリケーション系コマンド仕様書 [日本]_DSRC Application Command Spec [JP]
+- 183_USB車両情報系コマンド仕様書市販DSRC制御ユニット(87h) 　[日本]_USB Vehicle Information Command Spec [JP]
+- 184_USB光VICS系プロトコル仕様書 [日本]_USB Optical VICS Protocol Spec [JP]
+- 185_USB光VICS系コマンド仕様書 [日本]_USB Optical VICS Command Spec [JP]
+- 186_ETC_USBデバイス仕様書 [日本]_ETC-USB Device Spec [JP]
+- 187_USB 車両情報系プロトコル(Step2)仕様書 [日本]_USB Vehicle Information Protocol (STEP2) Spec [JP]
+- 188_USB DSRCアプリケーション系　プロトコル仕様書 [日本]_USB_DSRC Application Protocol Spec [JP]
+- 195_情報調停機能仕様書_Information Mediation function Spec
+- 21CY_Microphone_Specification
+- 231_Ais-cockpit専用エリア意匠仕様書[北米以外]_Ais-cockpit area styling Spec[Except NA]
+- 394_用品サウンドシステムARL[日本]_Accessory Retrofit Sound System ARL[JP]
+- 507_ソフトウェアキーボード機能仕様書 [北米以外]_Handwrite Recognition Software keyboard Function Spec[ExceptNA]
+- 516_MM時刻機能仕様書_MM Clock Function Spec
+- 519_ナビ-センター連携サービスIF要求仕様書_Navi-TSC Service IF Requirement Spec
+- 527_降車支援システム機能仕様書_DOA System Function Spec
+- 528_ソーラー充電システム要求仕様書_Solor Charging System Requirement Spec
+- 533_運転支援サービス要求仕様書（ナビ連携）_Driving support service request Spec
+- 535_先読みエコドライブ、先読みＦＣサービス要求仕様書（ナビ連携）_Predictive Efficient Drive and Predictive Efficient Drive for FC Spec
+- 536_車両連携アプリ機能仕様書_Vehicle-Suits App Functional Spec
+- 537_リモート駐車システム要求仕様書_Remote parking system requirement Spec
+- 545_Navicon／NaviBridge連携機能仕様書_Navicon／NaviBridge HU Function Spec
+- 558_イルミ制御仕様書_Illumination control Spec
+- 560_車両カスタマイズ機能仕様書_Vehicle Cutomization Function Spec
+- 561_ドライブモードセレクト機能仕様書_Drive Mode Select Function Spec
+- 562_燃費履歴機能仕様書_Fuel Consumption History Function Spec
+- 563_エネルギーフロー機能仕様書_Energy Flow Function Spec
+- 565_クリアランスソナー機能仕様書_Clearance Sonar System Function Spec
+- 567_ニューマティックシート機能仕様書_Pneumatic Sheet Function Spec
+- 569_充電詳機能仕様書_Charge Function Spec
+- 572_自動運転音声通知要求仕様書_Automated Drive Voice Notice Requirement Spec
+- 573_エアコン詳細機能仕様書_Air Conditioner Function Spec
+- 574_バレーモード機能仕様書 [欧]_Valet Mode Function Spec[EU]
+- 575_提案サービス機能仕様書 [日本・北米・欧州]_Ｃonvenience Service Function Spec[JP_NA_EU]
+- 577_Ais-Cockpit専用エリア詳細機能仕様書_Ais-Cockpit area Function Spec
+- 578_先進安全音声発話要求仕様書_ADAS Voice Notice Requirement Spec
+- 579_クリソナ音声発話サラウンド通知要求仕様書_Clearance Sonar Voice Surround Notice Requirement Spec
+- 584_ETC情報機能仕様書 [日本]_ETC Information Function Spec [JP]
+- 585_ETC DSRCナビ連携機能仕様書 [日本]_ETC DSRC Navi Cooperation Function Spec [JP]
+- 588_高度化光システム要求仕様書 [日本]_Advancement optical system requirements Specs [JP]
+- 589_高度化光対応DSRCナビ連携機能仕様書 [日本]_DSRC Navi Cooperation Function Spec for Advancement optical system [JP]
+- 590_RSE対応機能要求仕様書_RSE fuction required Spec
+- 593_地図生成用データ収集機能要求仕様書_Function Requirement Spec of Data Collection for Map Generation
+- 594_用品サウンドシステム詳細機能仕様書 [日本]_Accessory Retrofit Sound System function Spec [JP]
+- 598_用品ドライブレコーダ連携 機能仕様書_Accessory Drive Recorder Function Spec
+- 599_Qi NFC 連携機能仕様書_Qi NFC Cooperation Function Spec
+- 624__◆Delete◆クラウド連携エコ運転支援システムDCU×センタ仕様書 [JPNA]_Cloud cooperation eco drive support system DCU-Center Spec[JPNA]
+- 624_クラウド連携エコ運転支援システムDCU×センタ仕様書 [JPNA]_Cloud cooperation eco drive support system DCU-Center Spec[JPNA]
+- 703_HU通信機能仕様書_HU Communication Function Spec
+- 709_緊急通報機能仕様書_Emergency Call function Spec
+- 711_◆Delete◆車両情報活用機能要求仕様書 [日本北米中国]_Vehicle data utilization function requirement Spec[JP_NA_CN]
+- 715_◆Delete◆車両情報活用システムガイドライン [日本北米中国]_Vehicle data utilization system guideline[JP_NA_CN]
+- 723_ユーザ認証機能仕様書_User_Registration_Func_Spec
+- A103_エージェントデータアップローダ 機能詳細仕様書 [北米以外]_Agent_Data_Uploader_Agent[Except NA]
+- 【OT-00256】オーディオ保護回路ガイドライン Audio protection circuit guideline Specification
+- 【RSE】
+- 【Spec_HMILocalRelease】

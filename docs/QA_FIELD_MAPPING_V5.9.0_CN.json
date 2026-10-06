@@ -1,0 +1,302 @@
+{
+  "file": "20260401_hyoukaQA.xlsx",
+  "sheet": "export",
+  "header_row_or_first_data_row": 1,
+  "column_count": 112,
+  "recognized_count": 59,
+  "unknown_count": 53,
+  "recognized": [
+    {
+      "source": "要約",
+      "canonical": "summary"
+    },
+    {
+      "source": "課題キー",
+      "canonical": "issue_key"
+    },
+    {
+      "source": "課題 ID",
+      "canonical": "issue_id"
+    },
+    {
+      "source": "親 ID",
+      "canonical": "parent_issue_id"
+    },
+    {
+      "source": "課題タイプ",
+      "canonical": "issue_type"
+    },
+    {
+      "source": "ステータス",
+      "canonical": "status"
+    },
+    {
+      "source": "プロジェクト キー",
+      "canonical": "project_key"
+    },
+    {
+      "source": "プロジェクト名",
+      "canonical": "project_name"
+    },
+    {
+      "source": "プロジェクトタイプ",
+      "canonical": "project_type"
+    },
+    {
+      "source": "プロジェクト リーダー",
+      "canonical": "project_leader"
+    },
+    {
+      "source": "優先度",
+      "canonical": "priority"
+    },
+    {
+      "source": "解決状況",
+      "canonical": "resolution"
+    },
+    {
+      "source": "担当者",
+      "canonical": "assignee"
+    },
+    {
+      "source": "報告者",
+      "canonical": "reporter"
+    },
+    {
+      "source": "作成者",
+      "canonical": "creator"
+    },
+    {
+      "source": "作成日",
+      "canonical": "created_at"
+    },
+    {
+      "source": "更新日",
+      "canonical": "updated_at"
+    },
+    {
+      "source": "最終閲覧日",
+      "canonical": "last_viewed_at"
+    },
+    {
+      "source": "解決日",
+      "canonical": "resolved_at"
+    },
+    {
+      "source": "コンポーネント",
+      "canonical": "component"
+    },
+    {
+      "source": "期限",
+      "canonical": "due_at"
+    },
+    {
+      "source": "ラベル",
+      "canonical": "labels"
+    },
+    {
+      "source": "説明",
+      "canonical": "description"
+    },
+    {
+      "source": "ウォッチャー",
+      "canonical": "watchers"
+    },
+    {
+      "source": "作業ログ",
+      "canonical": "worklog"
+    },
+    {
+      "source": "添付ファイル",
+      "canonical": "attachments"
+    },
+    {
+      "source": "カスタム フィールド (Watcher/s)",
+      "canonical": "watchers"
+    },
+    {
+      "source": "カスタム フィールド (グレード)",
+      "canonical": "grade"
+    },
+    {
+      "source": "カスタム フィールド (シート名)",
+      "canonical": "sheet_name"
+    },
+    {
+      "source": "カスタム フィールド (ソフトバージョン)",
+      "canonical": "software_version"
+    },
+    {
+      "source": "カスタム フィールド (テスト仕様書不備詳細)",
+      "canonical": "test_spec_defect_detail"
+    },
+    {
+      "source": "カスタム フィールド (テスト仕様書名)",
+      "canonical": "test_spec_name"
+    },
+    {
+      "source": "カスタム フィールド (不具合内容)",
+      "canonical": "defect_content"
+    },
+    {
+      "source": "カスタム フィールド (仕向け)",
+      "canonical": "destination"
+    },
+    {
+      "source": "カスタム フィールド (内容種別)",
+      "canonical": "content_type"
+    },
+    {
+      "source": "カスタム フィールド (前提条件)",
+      "canonical": "precondition"
+    },
+    {
+      "source": "カスタム フィールド (参照仕様書)",
+      "canonical": "reference_spec"
+    },
+    {
+      "source": "カスタム フィールド (回答)",
+      "canonical": "answer"
+    },
+    {
+      "source": "カスタム フィールド (回答区分)",
+      "canonical": "answer_type"
+    },
+    {
+      "source": "カスタム フィールド (回答希望日)",
+      "canonical": "answer_requested_at"
+    },
+    {
+      "source": "カスタム フィールド (変更対象情報)",
+      "canonical": "change_target"
+    },
+    {
+      "source": "カスタム フィールド (実動作)",
+      "canonical": "actual_behavior"
+    },
+    {
+      "source": "カスタム フィールド (対策適用範囲)",
+      "canonical": "countermeasure_scope"
+    },
+    {
+      "source": "カスタム フィールド (影響分析結果)",
+      "canonical": "impact_analysis"
+    },
+    {
+      "source": "カスタム フィールド (影響度)",
+      "canonical": "impact"
+    },
+    {
+      "source": "カスタム フィールド (手順/期待値)",
+      "canonical": "procedure_expected"
+    },
+    {
+      "source": "カスタム フィールド (担当Gr.)",
+      "canonical": "responsible_group"
+    },
+    {
+      "source": "カスタム フィールド (最終回答Gr.)",
+      "canonical": "final_answer_group"
+    },
+    {
+      "source": "カスタム フィールド (最終回答内容)",
+      "canonical": "final_answer"
+    },
+    {
+      "source": "カスタム フィールド (最終回答者)",
+      "canonical": "final_answerer"
+    },
+    {
+      "source": "カスタム フィールド (根拠)",
+      "canonical": "rationale"
+    },
+    {
+      "source": "カスタム フィールド (概要)",
+      "canonical": "summary"
+    },
+    {
+      "source": "カスタム フィールド (機種)",
+      "canonical": "model"
+    },
+    {
+      "source": "カスタム フィールド (発生環境_詳細)",
+      "canonical": "occurrence_environment_detail"
+    },
+    {
+      "source": "カスタム フィールド (発生確率)",
+      "canonical": "occurrence_probability"
+    },
+    {
+      "source": "カスタム フィールド (項目No./セル番地)",
+      "canonical": "item_cell"
+    },
+    {
+      "source": "カスタム フィールド (顧客報告)",
+      "canonical": "customer_report"
+    },
+    {
+      "source": "コメント",
+      "canonical": "comments"
+    },
+    {
+      "source": "壁ID",
+      "canonical": "wall_id"
+    }
+  ],
+  "unknown": [
+    "投票",
+    "残余見積",
+    "消費時間",
+    "Σ 残余見積",
+    "Σ 消費時間",
+    "課題外部リンク (Blocks)",
+    "課題外部リンク (Cloners)",
+    "課題外部リンク (Duplicate)",
+    "課題外部リンク (Relates)",
+    "課題外部リンク (終了-終了 依存関係(WBSGantt))",
+    "課題外部リンク (終了-開始 依存関係(WBSGantt))",
+    "課題外部リンク (親子リンク(WBSGantt))",
+    "カスタム フィールド (MSOC Full Version)",
+    "カスタム フィールド (MSOC RC Version)",
+    "カスタム フィールド (Same Cause Failure)",
+    "カスタム フィールド (User Infomation)",
+    "カスタム フィールド (デグレ管理_実施状況(過去Ver再現実験))",
+    "カスタム フィールド (プロジェクト固有項目)",
+    "カスタム フィールド (マイルストン(WBSGantt))",
+    "カスタム フィールド (ランク)",
+    "カスタム フィールド (ランク (Obsolete))",
+    "カスタム フィールド (仕様発行予定日)",
+    "カスタム フィールド (仕様発行完了日)",
+    "カスタム フィールド (作成部署)",
+    "カスタム フィールド (作業割合(WBSGantt))",
+    "カスタム フィールド (出荷停止)",
+    "カスタム フィールド (品速No.)",
+    "カスタム フィールド (実施可能日目途)",
+    "カスタム フィールド (対象Jenkins Job)",
+    "カスタム フィールド (対象Jenkins Job(16DOP))",
+    "カスタム フィールド (待機状態)",
+    "カスタム フィールド (必要機材・機能名称)",
+    "カスタム フィールド (必要機材・機能詳細)",
+    "カスタム フィールド (手動スケジュール(WBSGantt))",
+    "カスタム フィールド (拠点展開チェック)",
+    "カスタム フィールド (拠点展開状況)",
+    "カスタム フィールド (横展開(ETC/V2X))",
+    "カスタム フィールド (横展開(IVI/DSM))",
+    "カスタム フィールド (横展開(Map))",
+    "カスタム フィールド (横展開(Meter/HUD))",
+    "カスタム フィールド (横展開(TCU))",
+    "カスタム フィールド (着手指示ステータス)",
+    "カスタム フィールド (管理対象フラグ)",
+    "カスタム フィールド (背反の検討結果)",
+    "カスタム フィールド (進捗率[CT])",
+    "カスタム フィールド (進捗率[IT])",
+    "カスタム フィールド (進捗率[MK])",
+    "カスタム フィールド (進捗率[PD])",
+    "カスタム フィールド (進捗率[RA])",
+    "カスタム フィールド (進捗率[SD])",
+    "カスタム フィールド (過去トラチェック)",
+    "カスタム フィールド (過去トラ登録状況)",
+    "カスタム フィールド (開始日)"
+  ],
+  "unknown_policy": "PRESERVE_IN_RAW_JSON_AND_CUSTOM_FIELDS"
+}

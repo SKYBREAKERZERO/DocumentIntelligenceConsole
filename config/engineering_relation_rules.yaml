@@ -1,0 +1,77 @@
+version: engineering-relations-v5-toyota-dependency-graph
+mode: deterministic-sql-first
+
+entity_types:
+  - SPEC_REFERENCE
+  - REQUIREMENT
+  - SIGNAL
+  - INTERFACE
+  - FUNCTION
+  - ECU
+  - PROTOCOL
+
+relation_types:
+  specification:
+    - REFERENCES
+    - DEPENDS_ON
+  requirement:
+    - DEFINES_REQUIREMENT
+    - IMPLEMENTS_REQUIREMENT
+  signal:
+    - PRODUCES_SIGNAL
+    - CONSUMES_SIGNAL
+    - USES_SIGNAL
+  interface:
+    - EXPOSES_INTERFACE
+    - USES_INTERFACE
+    - CALLS_INTERFACE
+  engineering:
+    - DEFINES_FUNCTION
+    - RELATED_TO_ECU
+    - USES_PROTOCOL
+
+extraction_policy:
+  authoritative_methods:
+    - EXACT_SPEC_NAME
+    - EXACT_SPEC_CODE
+    - EXACT_SPEC_ALIAS
+    - TOYOTA_CODE_TITLE_REFERENCE
+    - TOYOTA_BRACKET_SPEC_REFERENCE
+    - TOYOTA_BRACKET_LIST_REFERENCE
+    - TOYOTA_REFERENCE_TABLE_CODE
+    - LOCAL_REFERENCE_TABLE_TITLE
+    - EXACT_QUOTED_SPEC_TITLE
+    - EXPLICIT_SPEC_REFERENCE
+    - REFERENCE_SECTION_CODE
+    - REFERENCE_SECTION_TITLE_WITH_CODE
+    - RECONCILE_EXACT_CODE
+    - RECONCILE_EXACT_TITLE
+    - EXACT_REQUIREMENT_ID
+    - EXPLICIT_SIGNAL_LABEL
+    - EXPLICIT_INTERFACE_LABEL
+    - EXPLICIT_FUNCTION_LABEL
+    - EXPLICIT_ECU_LABEL
+    - EXPLICIT_PROTOCOL_LABEL
+  llm_candidates_enabled: false
+  qdrant_reference_resolution_enabled: false
+  fuzzy_auto_confirm_enabled: false
+  confirmed_only_default_graph: true
+  preserve_unresolved_spec_references: true
+  preserve_ambiguous_spec_references: true
+  retain_extraction_generations: true
+  exact_registry_first: true
+  document_local_reference_registry_enabled: true
+  primary_spec_identity_required_for_dependency_graph: true
+  supporting_documents_hidden_default: true
+  reference_section_context_enabled: true
+  quoted_title_candidate_enabled: true
+  internal_section_reference_guard_enabled: true
+  standard_reference_guard_enabled: true
+  max_evidence_snippet_chars: 480
+
+query_policy:
+  default_version_policy: CURRENT
+  default_hop_depth: 1
+  max_hop_depth: 3
+  max_nodes: 200
+  max_edges: 400
