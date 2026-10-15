@@ -1,0 +1,8 @@
+{
+  "schema": "stage1-filtered-samples-v1",
+  "manifest": {
+    "transformation": "REPLACED",
+    "offset_policy": "CHANGED"
+  },
+  "cases": []
+}

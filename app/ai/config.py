@@ -61,7 +61,8 @@ class AISettings:
     api_enabled: bool = False
     api_host: str = "127.0.0.1"
     api_port: int = 18080
-    api_key: str = "local-rag-key"
+    api_key: str = ""
+    external_webui_url: str = "http://127.0.0.1:3000"
     ollama_keep_alive: str = "30m"
     ollama_connect_timeout: float = 10.0
     ollama_read_timeout: float = 600.0

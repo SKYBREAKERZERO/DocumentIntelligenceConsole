@@ -8,7 +8,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.ai.ollama_client import OllamaClient
+from app.ai.internal_query import interpret_internal_query
 from app.ai.retrieval import EnterpriseRetriever, EvidenceItem, RetrievalResult
+from app.engineering_intelligence.workflow import build_workflow
+from app.engineering_intelligence.ontology import expand_engineering_query
 
 
 ALLOWED_TOOLS = {
@@ -154,10 +157,24 @@ class FastIntentRouter:
             if issue:
                 return f"{current}\nConversation issue key: {issue.group(0).upper()}"
         for text in prior_user:
-            if cls._ENGINEERING_HINT.search(text) or re.search(r"(?:spec[-_: ]*)?\d{3,6}", text, re.I):
-                codes = re.findall(r"(?<!\d)(\d{3,6})(?!\d)", text)
+            if cls._ENGINEERING_HINT.search(text) or interpret_internal_query(text).specification_intent:
+                codes = EnterpriseRetriever._entity_spec_codes((), text)
                 if codes:
                     return f"{current}\nConversation specification: SPEC-{codes[0]}"
+                # Only carry a small, explicit technical vocabulary, never raw
+                # assistant output or arbitrary previous text/instructions.
+                anchors = []
+                for expr, name in (
+                    (r"(?<![a-z0-9])BT(?![a-z0-9])|bluetooth|蓝牙|藍牙", "Bluetooth"),
+                    (r"(?<![a-z0-9])DCM(?![a-z0-9])", "DCM"),
+                    (r"(?<![a-z0-9])(?:HFP|BLE|HU)(?![a-z0-9])", None),
+                    (r"(?<![A-Za-z0-9])21MM(?![A-Za-z0-9])|(?<![A-Za-z0-9])24MM(?![A-Za-z0-9])", None),
+                ):
+                    hit = re.search(expr, text, re.I)
+                    if hit:
+                        anchors.append(name or hit.group(0).upper())
+                if anchors:
+                    return f"{current}\nConversation technical topic: {', '.join(dict.fromkeys(anchors))}"
                 return f"{current}\nConversation domain: specification"
         for text in prior_user:
             if cls._ISSUE_HINT.search(text):
@@ -174,6 +191,21 @@ class FastIntentRouter:
         # answered from live introspection/static contracts, never model memory.
         if cls._SYSTEM_META_HINT.search(value):
             return FastRouteDecision("SYSTEM_META", "runtime/index/schema introspection intent detected", "SYSTEM_METADATA", "SYSTEM")
+
+        # Explicit cross-domain engineering questions must not be swallowed
+        # by the single-database issue shortcut. A normal issue-key lookup
+        # still uses the faster exact QA/BUG path.
+        interpreted = interpret_internal_query(value)
+        cross_domain = bool(
+            (interpreted.cross_domain and re.search(
+                r"(?:相关|關聯|关联|关系|依赖|影响|有没有|有无|包括|哪些|查|搜索|找|对照|核对|cross|relation|impact|change|diff)", value, re.I,
+            ))
+            or (cls._ISSUE_HINT.search(value)
+                and re.search(r"(?:21MM|24MM|式样书|仕様書|spec(?:ification)?|(?:^|\D)\d{3,6}(?!\d))", value, re.I)
+                and re.search(r"(?:关联|关系|依赖|影响|版本|变更|对照|核对|cross|relation|impact|change|diff)", value, re.I))
+        )
+        if cross_domain:
+            return FastRouteDecision("ENGINEERING_AGENT", "explicit cross-domain specification and QA/BUG analysis", "CROSS_DOMAIN_ENGINEERING", "SPEC")
 
         # Jira/QA/BUG registers use structured SQL for exact keys, status,
         # priority and counts; semantic Qdrant is added only when free-text
@@ -210,7 +242,7 @@ class FastIntentRouter:
         if identity_style and not detail_request:
             return FastRouteDecision("SPEC_LOOKUP", "exact specification identity intent detected", "SPECIFICATION_LOOKUP", "SPEC")
 
-        if cls._ENGINEERING_HINT.search(value) or re.search(
+        if interpreted.specification_intent or cls._ENGINEERING_HINT.search(value) or re.search(
             r"(?:^|[\s,，:：])(\d{3,6})(?=\s*(?:的|是什么|是什麼|の|について|相关|关联|参照|参考|引用|式样|式樣|仕様|spec))",
             value, flags=re.I,
         ):
@@ -260,7 +292,7 @@ class QueryPlanner:
             trace.append(AgentTraceStep("Planner", f"LLM plan accepted · tools={', '.join(plan.tools)}"))
         except Exception as exc:
             plan = self._fallback_plan(question, requested_scope, current_scope)
-            trace.append(AgentTraceStep("Planner", f"Structured planner fallback · {type(exc).__name__}: {exc}", status="DEGRADED"))
+            trace.append(AgentTraceStep("Planner", f"Structured planner fallback · {type(exc).__name__}", status="DEGRADED"))
         elapsed = int((time.perf_counter() - started) * 1000)
         return AgentPlanResult(plan=plan, duration_ms=elapsed, trace=tuple(trace))
 
@@ -286,7 +318,7 @@ Allowed tools: semantic_search, sql_exact_search, relation_search, version_searc
 Rules:
 - semantic_search: natural-language requirements, behavior, design explanations, fuzzy terminology.
 - sql_exact_search: exact spec code/name/section/identifier lookup.
-- relation_search: references, dependencies, upstream/downstream, related specifications.
+- relation_search: references, dependencies, upstream/downstream, related specifications and source-to-target REQUIREMENT-level evidence where available. An unreviewed candidate MUST NOT be called a confirmed dependency.
 - version_search: revision/version/change/diff/history questions.
 - unresolved_reference_search: unresolved/missing/unknown references.
 - specification_catalog: authoritative list/count of registered specifications; never approximate catalog questions with vector TopK.
@@ -339,8 +371,43 @@ JSON schema:
         if any(token in q_lower for token in ("版本", "revision", "rev", "diff", "变化", "变更", "历史", "修改了什么", "改了什么", "改动", "区别")):
             if "version_search" not in tool_list:
                 tool_list.append("version_search")
-        tools = tuple(tool_list)
-        queries = tuple(str(v).strip() for v in (raw.get("rewritten_queries") or []) if str(v).strip())[:4]
+        if interpret_internal_query(question).cross_domain or (FastIntentRouter._ISSUE_HINT.search(question) and re.search(r"(?:关系|影响|关联|版本|变更|cross|relation|impact|diff)", question, re.I)):
+            if "issue_search" not in tool_list and "issue_statistics" not in tool_list:
+                tool_list.append("issue_search")
+            # Dedicated issue corpus is accessed only on explicit cross-domain intent.
+            if "QABUG" not in scopes:
+                scopes = tuple((*scopes, "QABUG"))
+        # Explicit user scope always wins against an LLM-suggested broadening.
+        selected = str(requested_scope or "AUTO").strip().upper()
+        if selected in {"21MM", "24MM", "COMMON", "QABUG", "QA/BUG"}:
+            authoritative = selected.replace("QA/BUG", "QABUG")
+            cross_requested = interpret_internal_query(question).cross_domain
+            scopes = (authoritative, "QABUG") if cross_requested and authoritative != "QABUG" else (authoritative,)
+        # Question-explicit projects are authoritative even when UI scope is
+        # AUTO. An LLM must not silently cross from 21MM to 24MM (or vice versa).
+        if selected not in {"21MM", "24MM", "COMMON", "QABUG", "QA/BUG"}:
+            q_upper = question.upper()
+            question_scopes = (
+                ("21MM", "24MM") if "21MM" in q_upper and "24MM" in q_upper else
+                ("21MM",) if "21MM" in q_upper else
+                ("24MM",) if "24MM" in q_upper else ()
+            )
+            if question_scopes:
+                issue_cross = "issue_search" in tool_list and bool(FastIntentRouter._ISSUE_HINT.search(question))
+                scopes = (*question_scopes, "QABUG") if issue_cross else question_scopes
+        interpreted = interpret_internal_query(question)
+        if interpreted.specification_intent and re.search(r"式样|式樣|试样|試樣|仕様|specification|\bspec\b|文件名|文档名|书名", question, re.I):
+            for mandatory in ("specification_lookup", "sql_exact_search", "semantic_search"):
+                if mandatory not in tool_list:
+                    tool_list.append(mandatory)
+        tools = tuple(dict.fromkeys(tool_list))
+        # Deterministic multilingual variants precede speculative model rewrites;
+        # project and version scope always comes from the original question.
+        queries = tuple(dict.fromkeys((
+            *interpreted.queries,
+            *expand_engineering_query(question, max_queries=3),
+            *(str(v).strip()[:1200] for v in (raw.get("rewritten_queries") or []) if str(v).strip()),
+        )))[:4]
         if not queries:
             queries = (question,)
         intents = tuple(str(v).strip().upper() for v in (raw.get("intents") or []) if str(v).strip())[:8]
@@ -379,14 +446,25 @@ JSON schema:
             intents.append("SEMANTIC_QA")
         if "semantic_search" in tools and "sql_exact_search" not in tools:
             tools.append("sql_exact_search")
+        if FastIntentRouter._ISSUE_HINT.search(question) and (interpret_internal_query(question).cross_domain or re.search(r"(?:关联|关系|影响|变更|版本|cross|relation|impact|diff)", question, re.I)):
+            tools.append("issue_search")
+        interpreted = interpret_internal_query(question)
+        if interpreted.specification_intent and re.search(r"式样|式樣|试样|試樣|仕様|specification|\bspec\b|文件名|文档名|书名", question, re.I):
+            # Exact spec identifiers already use the authorized SQL exact route;
+            # fuzzy title candidates are only needed when no code was supplied.
+            if not EnterpriseRetriever._entity_spec_codes((), question):
+                tools.append("specification_lookup")
+            tools.extend(("sql_exact_search", "semantic_search"))
         dedup_tools = tuple(dict.fromkeys(tools))
         scopes = EnterpriseRetriever.resolve_scopes(requested_scope, question, current_scope)
+        if "issue_search" in dedup_tools and "QABUG" not in scopes:
+            scopes = (*scopes, "QABUG")
         entities = EnterpriseRetriever._entity_spec_codes((), question)
         return QueryPlan(
             scopes=scopes,
             intents=tuple(dict.fromkeys(intents)) or ("ENGINEERING_QA",),
             entities=entities,
-            rewritten_queries=(question,),
+            rewritten_queries=tuple(dict.fromkeys((*interpreted.queries, *expand_engineering_query(question, max_queries=3))))[:4],
             tools=dedup_tools,
             planner_source="deterministic-fallback",
             summary="Safe fallback selected read-only retrieval tools from explicit engineering terms.",
@@ -404,6 +482,8 @@ class EvidenceGovernor:
         "ISSUE_HYBRID": 0.96,
         "ISSUE_SQL_MATCH": 0.84,
         "RELATION_GRAPH": 1.03,
+        "CONTENT_RELATION": 0.89,
+        "REQUIREMENT_VERSION_CHANGE": 0.92,
         "RELATION": 1.00,
         "VERSION_CHANGE_DETAIL": 1.02,
         "VERSION_HISTORY": 1.00,
@@ -527,7 +607,15 @@ class EnterpriseAgent:
             conversation=conversation,
         )
         plan = plan_result.plan
+        try:
+            graph = build_workflow(plan.tools, plan.scopes)
+        except ValueError as exc:
+            # Reject unsafe/oversized model plans and use the deterministic
+            # read-only route, never arbitrary LLM-generated SQL/code.
+            plan = self.planner._fallback_plan(question, scope, current_scope)
+            graph = build_workflow(plan.tools, plan.scopes)
         trace: list[str] = [f"Planner [{plan.planner_source}] {plan.summary}"]
+        trace.append("Workflow DAG [bounded read-only, sequential, controlled]: " + " → ".join(n.tool for n in graph.nodes))
         trace.append(f"Resolved scopes: {', '.join(plan.scopes)}")
         trace.append(f"Tools: {', '.join(plan.tools)}")
         trace.append(f"Queries: {' | '.join(plan.rewritten_queries)}")

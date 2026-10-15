@@ -3,12 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from app.pipeline.docx_pipeline import DOCXPipeline
-from app.pipeline.pdf_pipeline import PDFPipeline
-from app.pipeline.pptx_pipeline import PPTXPipeline
-from app.pipeline.xlsx_pipeline import XLSXPipeline
-
-
 class IngestionPipeline:
     """
     文档摄取统一入口。
@@ -138,15 +132,19 @@ class IngestionPipeline:
         """
 
         if extension == ".pdf":
+            from app.pipeline.pdf_pipeline import PDFPipeline
             return PDFPipeline()
 
         if extension == ".docx":
+            from app.pipeline.docx_pipeline import DOCXPipeline
             return DOCXPipeline()
 
         if extension == ".pptx":
+            from app.pipeline.pptx_pipeline import PPTXPipeline
             return PPTXPipeline()
 
         if extension == ".xlsx":
+            from app.pipeline.xlsx_pipeline import XLSXPipeline
             return XLSXPipeline()
 
         raise ValueError(

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+
+import pytest
 from pathlib import Path
 
 from app.relations.extractor import EngineeringRelationExtractor, ExtractionUnit
@@ -142,9 +144,12 @@ def test_graph_uses_toyota_semantic_meaning_and_title_hint():
 
 
 def test_real_508_precision_has_only_plausible_primary_spec_codes():
-    payload = json.loads(
-        (ROOT / "output" / "508_24MM_User Profile function Spec_Ver.7.80.json").read_text(encoding="utf-8")
-    )
+    # The user's source document is confidential and intentionally excluded
+    # from the public/source release. This integration fixture is opt-in.
+    fixture = ROOT / "output" / "508_24MM_User Profile function Spec_Ver.7.80.json"
+    if not fixture.is_file():
+        pytest.skip("Confidential 508 golden fixture not included in source release")
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
     sections = {str(item.get("id")): item for item in payload.get("sections", [])}
     chapters = {str(item.get("id")): item for item in payload.get("chapters", [])}
     units = []

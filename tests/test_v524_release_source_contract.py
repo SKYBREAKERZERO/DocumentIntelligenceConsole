@@ -9,7 +9,7 @@ def test_v524_precision_release_contract():
     manager = (ROOT / "app" / "relations" / "manager.py").read_text(encoding="utf-8")
     graph = (ROOT / "app" / "relations" / "graph_service.py").read_text(encoding="utf-8")
 
-    assert 'APP_VERSION = "5.2.8"' in gui
+    assert 'APP_VERSION = "1.30"' in gui
     assert 'value="SPEC REFERENCES"' in gui
     assert 'value="Auto (recommended)"' in gui
     assert 'text="Audit candidates"' in gui

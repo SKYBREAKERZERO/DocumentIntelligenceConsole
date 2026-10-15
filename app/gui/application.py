@@ -199,13 +199,13 @@ from app.gui.ai_workspace import AIWorkspaceModule
 
 APP_NAME = "文档智能控制台"
 # APP_NAME = "Document Intelligence Console Enterprise"
-APP_VERSION = "1.03"
+APP_VERSION = "1.30"
 # APP_VERSION = "5.7.3-CN"
 # APP_VERSION = "5.6.0"
 # Historical source-contract compatibility markers. These are comments only;
 # APP_VERSION = "5.5.0"
 # several legacy regression tests intentionally grep the release where the
-# protected UI behavior was introduced. Runtime release is v1.03.
+# protected UI behavior was introduced. Runtime release is v1.04.
 # APP_VERSION = "5.2.8"
 # APP_VERSION = "5.3.2"
 
@@ -585,6 +585,10 @@ class DocumentIngestionGUI:
         self._bind_postgres_setting_traces()
 
         self._poll_events()
+
+        # Start the dedicated API lazily after rendering the desktop shell.
+        # It is a detached process and survives closing the GUI.
+        self.root.after(500, self._ensure_local_backend_running)
 
         LOGGER.info(
             "GUI application started | "
@@ -2634,6 +2638,8 @@ class DocumentIngestionGUI:
             left_panel
         )
 
+        self._build_local_webui_settings_card(left_panel)
+
         self._build_postgres_status_card(
             right_panel
         )
@@ -2641,6 +2647,284 @@ class DocumentIngestionGUI:
         self._build_postgres_help_card(
             right_panel
         )
+
+    def _open_stage1_review_window(self) -> None:
+        """Launch authorized local reviewer GUI without sharing backend tokens."""
+        import subprocess
+
+        if getattr(sys, "frozen", False):
+            messagebox.showwarning(
+                "Stage 1 审核",
+                "此源码版审核窗口未打包进旧 EXE。请用 Python 3.12 源码版启动。",
+                parent=self.root,
+            )
+            return
+        try:
+            project_root = Path(__file__).resolve().parents[2]
+            subprocess.Popen(
+                [sys.executable, "-m", "app.gui.stage1_review_window"],
+                cwd=str(project_root),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+            )
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Stage 1 审核", str(exc), parent=self.root)
+
+    # v1.04: developer-only local external UI & backend diagnostics.
+    # This card belongs to the tool's main Settings page (not to Open WebUI).
+    def _build_local_webui_settings_card(self, parent: ttk.Frame) -> None:
+        from app.ai.config import AISettingsStore
+
+        self._local_ui_settings_store = AISettingsStore(USER_CONFIG_DIR / "ai_config.json")
+        existing = self._local_ui_settings_store.load()
+        self.local_webui_url_var = tk.StringVar(value=existing.external_webui_url)
+        self.local_backend_port_var = tk.StringVar(value=str(existing.api_port))
+        self.local_webui_health_var = tk.StringVar(value="尚未检测 · 状态为实时探测结果，非模拟")
+
+        card = ttk.LabelFrame(parent, text="3. 外部 UI / Open WebUI · 本机开发者面板", padding=16, style="Card.TLabelframe", bootstyle="secondary")
+        card.pack(fill=X, pady=(10, 12))
+        card.columnconfigure(1, weight=1)
+        ttk.Label(card, text="Open WebUI 网址").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Entry(card, textvariable=self.local_webui_url_var).grid(row=0, column=1, sticky="ew", pady=5, padx=(10, 0))
+        ttk.Label(card, text="本地 API 端口").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Entry(card, textvariable=self.local_backend_port_var).grid(row=1, column=1, sticky="ew", pady=5, padx=(10, 0))
+        bar = ttk.Frame(card)
+        bar.grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 5))
+        ttk.Button(bar, text="默认浏览器打开", command=self._open_local_webui, bootstyle="primary-outline").pack(side=LEFT, padx=(0, 6))
+        ttk.Button(bar, text="复制网址", command=self._copy_local_webui, bootstyle="secondary-outline").pack(side=LEFT, padx=(0, 6))
+        ttk.Button(bar, text="保存 WebUI 配置", command=self._save_local_webui, bootstyle="success-outline").pack(side=LEFT, padx=(0, 6))
+        ttk.Button(bar, text="检查服务状态", command=self._check_local_webui_services, bootstyle="info-outline").pack(side=LEFT)
+        ttk.Label(card, textvariable=self.local_webui_health_var, justify="left", wraplength=520, bootstyle="secondary").grid(row=3, column=0, columnspan=2, sticky="w", pady=(7, 0))
+        ttk.Label(card, text="独立后台保持 localhost:18080；局域网只共享 Open WebUI，不共享 SQL/Qdrant/Ollama。", bootstyle="secondary", wraplength=520).grid(row=4, column=0, columnspan=2, sticky="w", pady=(7, 0))
+
+        manager = ttk.LabelFrame(card, text="后台进程与 Windows 登录自启动", padding=9, bootstyle="secondary")
+        manager.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        manager.columnconfigure(0, weight=1)
+        self.local_backend_status_var = tk.StringVar(value="启动后自动检测后台（关闭 GUI 不停止 Backend）")
+        ttk.Label(manager, textvariable=self.local_backend_status_var, wraplength=480, bootstyle="secondary").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Button(manager, text="确保 Backend 运行", command=self._ensure_local_backend_running, bootstyle="primary-outline").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.local_autostart_var = tk.BooleanVar(value=False)
+        if os.name == "nt":
+            try:
+                from app.enterprise.local_deployment import get_windows_login_autostart
+                self.local_autostart_var.set(get_windows_login_autostart())
+            except Exception:
+                LOGGER.exception("Could not read Windows login autostart")
+        ttk.Checkbutton(
+            manager, text="Windows 当前用户登录时自动启动管理工具及 Backend",
+            variable=self.local_autostart_var, command=self._toggle_windows_login_autostart,
+            bootstyle="round-toggle",
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        # Independent watchdog: unlike the GUI autostart checkbox, this stays
+        # alive after the desktop window is closed and may restore the Backend.
+        self.local_watchdog_var = tk.BooleanVar(value=False)
+        if os.name == "nt":
+            try:
+                from app.enterprise.local_deployment import get_backend_watchdog_autostart
+                self.local_watchdog_var.set(get_backend_watchdog_autostart())
+            except Exception:
+                LOGGER.exception("Could not read watchdog startup registration")
+        ttk.Checkbutton(
+            manager, text="后台独立看护（登录后自动恢复；关闭 GUI 仍监测）",
+            variable=self.local_watchdog_var, command=self._toggle_backend_watchdog,
+            bootstyle="round-toggle",
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Button(
+            manager, text="查看看护状态", command=self._refresh_backend_watchdog,
+            bootstyle="secondary-outline",
+        ).grid(row=4, column=0, sticky="w", pady=(6, 0))
+
+        lan = ttk.LabelFrame(card, text="当前 Wi-Fi 局域网共享（仅 Open WebUI）", padding=9, bootstyle="secondary")
+        lan.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        from app.enterprise.local_deployment import lan_share_status
+        self.local_lan_status_var = tk.StringVar(value=lan_share_status())
+        ttk.Label(lan, textvariable=self.local_lan_status_var, wraplength=500, bootstyle="secondary").pack(anchor="w")
+        controls = ttk.Frame(lan)
+        controls.pack(anchor="w", pady=(8, 0))
+        ttk.Button(controls, text="一键配置当前 Wi-Fi", command=lambda: self._configure_lan_share("Enable"), bootstyle="warning-outline").pack(side=LEFT, padx=(0, 6))
+        ttk.Button(controls, text="关闭局域网共享", command=lambda: self._configure_lan_share("Disable"), bootstyle="danger-outline").pack(side=LEFT, padx=(0, 6))
+        ttk.Button(controls, text="刷新", command=self._refresh_lan_share_status, bootstyle="secondary-outline").pack(side=LEFT)
+        ttk.Label(lan, text="仅用于受批准的公司内网测试；HTTP 无加密，正式多人处理机密文档前必须配置内网 HTTPS。需要管理员 UAC 授权，网络隔离策略不能通过本工具绕过。", wraplength=520, bootstyle="secondary").pack(anchor="w", pady=(6, 0))
+
+    def _ensure_local_backend_running(self) -> None:
+        """Never block Tk while starting Python/BGE-M3 or probing the API."""
+        from app.enterprise.local_deployment import ensure_backend_started, get_backend_state
+        try:
+            port = int(self.local_backend_port_var.get()) if hasattr(self, "local_backend_port_var") else 18080
+        except ValueError:
+            self.local_backend_status_var.set("Backend API 端口无效")
+            return
+        if hasattr(self, "local_backend_status_var"):
+            self.local_backend_status_var.set("正在后台检测 / 启动独立 API…")
+
+        def worker() -> None:
+            try:
+                result = ensure_backend_started(BASE_DIR, port, USER_CONFIG_DIR)
+                # First boot needs time to parse config and load the model.
+                if result == "STARTING":
+                    import time
+                    for _ in range(20):
+                        time.sleep(0.5)
+                        if get_backend_state(port, USER_CONFIG_DIR) == "RUNNING":
+                            result = "RUNNING"
+                            break
+                message = {
+                    "RUNNING": "Backend 已运行（独立进程）；关闭工具后仍可供 WebUI 使用",
+                    "STARTING": "Backend 已启动，仍在初始化；稍后刷新健康状态",
+                    "PORT_OCCUPIED_UNVERIFIED": "18080 已被其他服务占用或认证失败，未重复启动",
+                    "BACKEND_BINARY_REQUIRED": "EXE 部署缺少单独的 Backend 可执行文件",
+                }.get(result, result)
+            except Exception as exc:
+                message = f"Backend 启动失败：{type(exc).__name__}: {exc}；检查本地 logs/backend_startup.log"
+            try:
+                self.root.after(0, lambda: self.local_backend_status_var.set(message))
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, daemon=True, name="dic-backend-auto-launch").start()
+
+    def _toggle_windows_login_autostart(self) -> None:
+        from app.enterprise.local_deployment import set_windows_login_autostart, get_windows_login_autostart
+        try:
+            desired = self.local_autostart_var.get()
+            actual = set_windows_login_autostart(desired, BASE_DIR)
+            self.local_autostart_var.set(actual)
+            self.local_backend_status_var.set("已设置当前用户登录时自启动" if actual else "已关闭 Windows 登录自启动")
+        except Exception as exc:
+            LOGGER.exception("Windows autostart update failed")
+            try:
+                self.local_autostart_var.set(get_windows_login_autostart())
+            except Exception:
+                self.local_autostart_var.set(False)
+            messagebox.showerror("Windows 登录自启动", str(exc), parent=self.root)
+
+    def _toggle_backend_watchdog(self) -> None:
+        from app.enterprise.local_deployment import (
+            get_backend_watchdog_autostart, set_backend_watchdog_autostart,
+        )
+        try:
+            actual = set_backend_watchdog_autostart(self.local_watchdog_var.get(), BASE_DIR)
+            self.local_watchdog_var.set(actual)
+            self.local_backend_status_var.set(
+                "后台独立看护已启用；需 Windows 用户登录，非双机高可用" if actual
+                else "后台独立看护已关闭；现有 Backend 不会被停止"
+            )
+        except Exception as exc:
+            LOGGER.exception("Failed to update backend watchdog")
+            try:
+                self.local_watchdog_var.set(get_backend_watchdog_autostart())
+            except Exception:
+                self.local_watchdog_var.set(False)
+            messagebox.showerror("Backend 独立看护", str(exc), parent=self.root)
+
+    def _refresh_backend_watchdog(self) -> None:
+        from app.enterprise.local_deployment import read_backend_watchdog_status
+        self.local_backend_status_var.set(
+            "独立看护状态：" + read_backend_watchdog_status(USER_CONFIG_DIR)
+        )
+
+    def _refresh_lan_share_status(self) -> None:
+        from app.enterprise.local_deployment import lan_share_status
+        self.local_lan_status_var.set(lan_share_status())
+
+    def _configure_lan_share(self, action: str) -> None:
+        from app.ai.local_webui import validate_local_webui_url
+        from app.enterprise.local_deployment import request_lan_configuration
+        from urllib.parse import urlparse
+        try:
+            url = validate_local_webui_url(self.local_webui_url_var.get())
+            port = urlparse(url).port
+            if action == "Enable":
+                approved = messagebox.askyesno(
+                    "公司 Wi-Fi 内网共享确认",
+                    "只共享 Open WebUI，不开放 Backend/数据库/模型。\n\n"
+                    "需要公司 IT 授权，且所在 Wi-Fi 必须为可信内部网络。\n"
+                    "当前方案是 HTTP 明文，仅供连接验证，正式处理公司机密资料前请配置内部 HTTPS。\n\n"
+                    "要向 Windows 请求管理员权限来配置端口转发和受限防火墙规则吗？",
+                    parent=self.root,
+                )
+                if not approved:
+                    return
+            else:
+                if not messagebox.askyesno("关闭内网共享", "撤销本工具建立的端口转发和防火墙规则？", parent=self.root):
+                    return
+            request_lan_configuration(BASE_DIR, action, port=port)
+            self.local_lan_status_var.set("管理员操作已请求；请在 UAC 窗口确认，完成后点击刷新并从其他电脑测试")
+        except Exception as exc:
+            messagebox.showerror("Wi-Fi 局域网共享", str(exc), parent=self.root)
+
+    def _save_local_webui(self) -> None:
+        from dataclasses import replace
+        from app.ai.local_webui import validate_local_webui_url
+
+        try:
+            url = validate_local_webui_url(self.local_webui_url_var.get())
+            port = int(self.local_backend_port_var.get())
+            if not 1 <= port <= 65535:
+                raise ValueError("端口必须位于 1–65535")
+            old = self._local_ui_settings_store.load()
+            self._local_ui_settings_store.save(replace(old, external_webui_url=url, api_port=port, api_host="127.0.0.1", api_enabled=False, api_key=""))
+            self.local_webui_health_var.set(f"已保存 · {url} · API 端口 {port}（重启后端生效）")
+        except (ValueError, OSError) as exc:
+            messagebox.showerror("外部 UI 设置", str(exc), parent=self.root)
+
+    def _open_local_webui(self) -> None:
+        from app.ai.local_webui import open_webui_default_browser
+        try:
+            open_webui_default_browser(self.local_webui_url_var.get())
+        except ValueError as exc:
+            messagebox.showerror("Open WebUI", str(exc), parent=self.root)
+
+    def _copy_local_webui(self) -> None:
+        from app.ai.local_webui import validate_local_webui_url
+        try:
+            value = validate_local_webui_url(self.local_webui_url_var.get())
+            self.root.clipboard_clear()
+            self.root.clipboard_append(value)
+            self.local_webui_health_var.set("WebUI 网址已复制")
+        except ValueError as exc:
+            messagebox.showerror("Open WebUI", str(exc), parent=self.root)
+
+    def _check_local_webui_services(self) -> None:
+        from app.ai.local_webui import local_service_status, validate_local_webui_url
+        from app.ai.config import AISettingsStore
+
+        try:
+            webui = validate_local_webui_url(self.local_webui_url_var.get())
+            port = int(self.local_backend_port_var.get())
+        except ValueError as exc:
+            self.local_webui_health_var.set(f"配置错误: {exc}")
+            return
+        ai = AISettingsStore(USER_CONFIG_DIR / "ai_config.json").load()
+        ollama = ai.ollama_url
+        qdrant = self.qdrant_url_var.get()
+        db_host = self.postgres_host_var.get()
+        db_port = self.postgres_port_var.get()
+        db_user = self.postgres_user_var.get()
+        db_pass = self.postgres_password_var.get() or os.getenv("POSTGRES_PASSWORD", "")
+        db_name = self.postgres_database_var.get() or "rag"
+        self.local_webui_health_var.set("检查中…（异步）")
+
+        def worker() -> None:
+            status = local_service_status(webui_url=webui, api_port=port, ollama_url=ollama, qdrant_url=qdrant)
+            try:
+                import psycopg
+                with psycopg.connect(host=db_host, port=int(db_port), dbname=db_name, user=db_user, password=db_pass, connect_timeout=2) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT 1")
+                        status["PostgreSQL"] = "ONLINE" if cur.fetchone()[0] == 1 else "ERROR"
+            except Exception:
+                status["PostgreSQL"] = "OFFLINE"
+            snapshot = " | ".join(f"{name}: {state}" for name, state in status.items())
+            summary = f"{snapshot}  |  首选模型: {ai.chat_model or '未配置'}  |  Embedding: {ai.embedding_model}"
+            try:
+                self.root.after(0, lambda: self.local_webui_health_var.set(summary))
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, name="dic-settings-local-health", daemon=True).start()
 
     def _build_postgres_connection_card(
         self,
@@ -2965,6 +3249,14 @@ class DocumentIngestionGUI:
                 0,
             ),
         )
+
+        # v1.14: separate human-review process, never an Open WebUI action.
+        ttk.Button(
+            frame,
+            text="Stage 1 · 工程证据人工审核（独立窗口）",
+            command=self._open_stage1_review_window,
+            bootstyle="info-outline",
+        ).pack(fill=X, pady=(12, 0))
 
         schema_row = ttk.Frame(
             frame

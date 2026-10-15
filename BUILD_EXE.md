@@ -1,3 +1,9 @@
+# Source-release packaging notice (v1.28)
+
+The legacy Windows EXE build notes below belong to the earlier v1.03 desktop-only build. The included build_exe.ps1 now fails fast to avoid producing a misleading standalone v1.28 EXE. **They do not build or verify the v1.08 dual-process/watchdog deployment.** v1.08 GUI auto-start uses `.venv\Scripts\python.exe -m app.server` when running source. When packaging a frozen desktop EXE, you must also build/package a separate `DocumentIntelligenceBackend.exe`; the GUI deliberately refuses to simulate successful auto-start if that companion does not exist. Validate this separately on Windows before claiming production EXE support.
+
+---
+
 # Document Intelligence Console Enterprise v1.03 — Windows EXE Build
 
 ## One-click build
@@ -29,18 +35,3 @@ The application does **not** embed PostgreSQL/Qdrant/Ollama databases or model w
 - 64-bit Python 3.12 or 3.13 is required if no project `.venv` exists.
 - The full AI runtime includes PyTorch / Transformers / SentenceTransformers, so the resulting OneFile EXE can be large and the first launch can take longer than the source version.
 - The build script intentionally performs a clean PyInstaller build to prevent stale module/DLL leakage between releases.
-
-## v1.03 build verification dependency
-
-The EXE build runs a focused pytest regression suite before PyInstaller. `pytest==9.1.1` is now included in `requirements-exe.txt`, and `build_exe.ps1` also self-installs pytest when an older `.venv-build` is reused. You do not need to delete the existing build virtual environment.
-
-## Pytest Temp / WinError 5
-
-The EXE verification step does not use the global Windows pytest temp directory.
-`build_exe.ps1` forces `TEMP`, `TMP`, and pytest `--basetemp` to a project-local
-`.build-temp` directory. This avoids `PermissionError: [WinError 5]` caused by
-stale or restricted ACLs under `%LOCALAPPDATA%\Temp\pytest-of-<user>`.
-
-If an older build environment produced that error, use the current build package
-and rerun `build_exe.cmd`; no administrator shell and no manual deletion of the
-global pytest temp directory is required.

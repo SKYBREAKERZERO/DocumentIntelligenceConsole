@@ -1,32 +1,22 @@
-# Document Intelligence Console v1.03
+# DocumentIntelligenceConsole Enterprise v1.30 CN FULL
 
-`v1.03` continues the consolidated 1.x application release line; future releases increment from this baseline.
+v1.30 introduces an internal-only engineering agent retrieval gate: controlled multilingual/fuzzy title discovery, fixed read-only SQL/Qdrant search tools, no-generation-on-empty-evidence, distinct source failure vs no hits, and authenticated read-only per-scope corpus health. The Open WebUI operator must select `document-intelligence-rag` and disable direct model/web-search bypass; these backend code changes do not enforce the external UI's persistent settings. The full deployment checklist is in `docs/ENGINEERING_INTERNAL_AGENT_v1.30_CN.md`. The legacy FastAPI OpenAI-compatible API version stays at v1.20. No live production corpus is changed or certified.
 
-## v1.03 RAG health governance
+v1.29 fixes the UTF-16 dependency manifest, collection-time database/PDF side effects and introduces explicit opt-in, redacted Windows GUI import / live PostgreSQL read-only transaction probes. See `docs/ENGINEERING_STAGE1_v1.29_WINDOWS_SQL_CN.md`. These probes never constitute production sign-off.
 
-- Index freshness gaps are reported as `WARNING · Index sync required` when Ollama/PostgreSQL/Qdrant dependencies are healthy.
-- A missing Qdrant collection for an authoritative SQL scope with zero current chunks is treated as a valid empty scope (`SKIPPED`).
-- Vector dimension, distance, point identity and payload contract violations remain hard `ERROR` conditions.
-- QA/BUG health diagnostics expose the structured field-level record-to-chunk fan-out and distinguish it from duplicate records.
-- SQL/Qdrant backlog is repaired through incremental sync rather than forcing a full rebuild.
+Stage 1 v1.28 introduces `scripts/stage1_release_readiness.py`: static package/dependency preflight and a fail-closed local source hash and identity check spanning native PDF audit, read-only SQL trace and Gold score reports. It never asserts production acceptance or authenticates SQL, reviewer identity or a Windows GUI session. Historical loader smoke tests are now self-contained. See `docs/ENGINEERING_STAGE1_v1.28_RELEASE_ACCEPTANCE_CN.md`.
 
-## Primary specification-body arbitration
+Stage 1 v1.27 adds opt-in structural Gold review for the PDF/native/SQL source chain, exported-section membership proxy and the **exhaustive pair universe among detected adjacent-page PDF tables**. Independent manual labels are required before Precision/Recall/F1 is defined; legacy Stage1 Gold v3 still evaluates requirement/scope spans. A passing metric gate does **not** certify semantic equivalence, DCM state transitions or production acceptance. See `docs/ENGINEERING_STAGE1_v1.27_STRUCTURAL_GOLD_CN.md`.
 
-A logical specification can own multiple physical files: the main specification body, Cover Sheet, Check Sheet, Test Sheet, translations and other supporting artefacts. v1.02 defines one authoritative rule across the product:
 
-- `PRIMARY_CONTENT`: specification body; authoritative for RAG, engineering relations, version history and version comparison.
-- `METADATA_SUPPORT`: Cover Sheet and similar artefacts; retained for metadata/audit only and never allowed to replace the body.
+**Stage 1 PDF → Pipeline JSON → PostgreSQL Content → Requirement Unit crosswalk.** The new opt-in, read-only `scripts/inspect_stage1_native_sql_chain.py` recomputes native PDF page/text evidence and checks the PostgreSQL project, specification version, source binary SHA-256, backfill receipt, content snapshot, and requirement offsets within a REPEATABLE READ READ ONLY transaction. Missing/ambiguous PDF matches, invalid exported sections, SQL duplicates, unit-offset drift, or truncated review queues are explicitly blocked. The output is redacted and contains only hashes, positions, statuses and SQL numeric identifiers.
 
-The same `PrimarySpecificationDocumentPolicy` is enforced by Specification Lookup, Current SQL RAG views, Qdrant sync/runtime filtering, exact SQL retrieval, Engineering Relations and version comparison.
+This is **literal source corroboration, not semantic certification**. Neither DCM state changes, bilingual requirements, condition/action scope, nor cross-page table headers are automatically approved. The older v1.24 and v1.25 tools remain intact. See [`docs/ENGINEERING_STAGE1_v1.26_NATIVE_SQL_CHAIN_CN.md`](docs/ENGINEERING_STAGE1_v1.26_NATIVE_SQL_CHAIN_CN.md) for PowerShell usage.
 
-Legacy databases are supported. The database one-click upgrade marks obvious supporting files as `SUPPORTING / METADATA_SUPPORT / EXCLUDE` without deleting immutable history. Read models also bypass a legacy `current_version_id` that points to a Cover Sheet and select the preferred primary body instead.
+**Verification limits:** 16 new synthetic regressions (generated PDFs and fake database cursors); the older `input/test.pdf` collection blocker was removed; six legacy modules may still require `psycopg` / `ttkbootstrap` before collection on a clean machine. There is no production PostgreSQL access, customer-native DCM PDF acceptance, Windows GUI validation or freshly compiled EXE. This is a full source ZIP.
 
-## Version comparison
+---
 
-Only `PRIMARY_CONTENT -> PRIMARY_CONTENT` endpoints are legal. Supporting, metadata-only, translation and issue-register artefacts are excluded from business-version selectors and rejected by the diff engine.
+## Runtime architecture
 
-## Upgrade from an older package
-
-Run the enterprise database one-click upgrade once for each active 21MM/24MM/Common database, then run one SQL -> Qdrant incremental sync for the affected scope. This refreshes read views and removes legacy supporting-document points while restoring the preferred body to the Current index.
-
-The application version is v1.03. The internal PostgreSQL `RAG Schema v6` identifier is retained as a database compatibility contract and is not the application release version.
+The legacy application still contains its Windows GUI, local Backend, Ollama and Open WebUI integration, PostgreSQL authority and Qdrant derived indexes. Preserve your existing secrets, `%LOCALAPPDATA%` configurations, databases and Docker volumes during upgrades; do not run two releases on the same backend port.

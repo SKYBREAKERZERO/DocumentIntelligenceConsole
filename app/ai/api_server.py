@@ -30,6 +30,10 @@ class OpenAICompatibleServer:
         self.host = host
         self.port = int(port)
         self.api_key = str(api_key or "")
+        if self.host not in {"127.0.0.1", "localhost", "::1"}:
+            raise ValueError("Embedded API must bind to loopback")
+        if len(self.api_key) < 32 or self.api_key == "local-rag-key":
+            raise ValueError("Embedded API requires a strong per-install token")
         self.service_factory = service_factory
         self.model_provider = model_provider
         self.current_scope_provider = current_scope_provider
@@ -46,16 +50,15 @@ class OpenAICompatibleServer:
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
-            server_version = "DocumentIntelligenceRAG/1.03"
+            server_version = "DocumentIntelligenceRAG/1.04"
 
             def log_message(self, fmt: str, *args: Any) -> None:
                 return
 
             def _auth_ok(self) -> bool:
-                if not outer.api_key:
-                    return True
+                import hmac
                 value = self.headers.get("Authorization", "")
-                return value == f"Bearer {outer.api_key}"
+                return hmac.compare_digest(value, f"Bearer {outer.api_key}")
 
             def _send_json(self, status: int, payload: dict[str, Any]) -> None:
                 body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -67,7 +70,10 @@ class OpenAICompatibleServer:
 
             def do_GET(self) -> None:
                 if self.path in {"/health", "/ready"}:
-                    self._send_json(200, {"status": "ok", "service": "Document Intelligence Enterprise AI AUTO", "version": "1.03", "mode": "ENTERPRISE AUTO"})
+                    if not self._auth_ok():
+                        self._send_json(401, {"error": {"message": "Unauthorized"}})
+                        return
+                    self._send_json(200, {"status": "ok", "service": "Document Intelligence Enterprise AI AUTO", "version": "1.04", "mode": "ENTERPRISE AUTO"})
                     return
                 if self.path == "/v1/models":
                     if not self._auth_ok():

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from app.relations.extractor import (
     EXTRACTOR_VERSION,
     EngineeringRelationExtractor,
@@ -76,9 +78,10 @@ def test_toyota_reference_resolves_when_target_master_exists():
 
 
 def test_real_508_json_regression_contains_408_and_703_without_target_imports():
-    payload = json.loads(
-        (ROOT / "output" / "508_24MM_User Profile function Spec_Ver.7.80.json").read_text(encoding="utf-8")
-    )
+    source = ROOT / "output" / "508_24MM_User Profile function Spec_Ver.7.80.json"
+    if not source.is_file():
+        pytest.skip("Requires separately authorized real 508 JSON; not distributed in source ZIP")
+    payload = json.loads(source.read_text(encoding="utf-8"))
     sections = {str(item.get("id")): item for item in payload.get("sections", [])}
     chapters = {str(item.get("id")): item for item in payload.get("chapters", [])}
     units = []

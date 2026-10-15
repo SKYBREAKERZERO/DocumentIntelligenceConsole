@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("ttkbootstrap", reason="Windows GUI dependency not installed")
+pytest.importorskip("psycopg", reason="PostgreSQL GUI dependency not installed")
+
 from app.gui.application import DocumentIngestionGUI
 
 

@@ -393,6 +393,15 @@ class EnterpriseRAGService:
                     raw,
                     trace=tuple((*raw.trace, f"Conversation follow-up resolved for retrieval: {routing_question.splitlines()[-1]}")),
                 )
+            # Connection exception text can contain DSNs, hosts or credentials;
+            # warnings in the API response should expose only diagnostic type.
+            raw = replace(
+                raw,
+                warnings=tuple(
+                    (str(w).split(":", 1)[0][:110] + " (check local sources)")
+                    for w in raw.warnings
+                ),
+            )
             effective_limit = self._effective_evidence_limit(question, raw)
             retrieval = self._renumber_governed(raw, effective_limit)
             if not retrieval.request_id:
@@ -527,6 +536,25 @@ class EnterpriseRAGService:
             )
         return prepared, retrieval
 
+    @staticmethod
+    def _bounded_no_evidence(retrieval: RetrievalResult) -> str:
+        """Return a fixed, non-generative reply for missing internal evidence.
+
+        The LLM is not called on this path: prompt-only prohibitions are not a
+        sufficient guard against invented enterprise documents and issue keys.
+        """
+        if retrieval.warnings:
+            return (
+                "内部知识检索未能完整执行，因此不能确认相关式样书或 QA/BUG 内容。"
+                "请检查本地 PostgreSQL/Qdrant 的连接、集合和索引状态，"
+                "然后重试；本次不会使用外网或模型记忆代替企业证据。"
+            )
+        return (
+            "已执行授权范围内的内部检索，但没有获得足以支持回答的文档或 QA/BUG 证据。"
+            "可以尝试提供项目（如 21MM/24MM）、业务功能或时间范围；"
+            "不需要完整文件名。本次不会凭模型记忆编造企业资料。"
+        )
+
     def answer_stream(
         self,
         messages: list[dict[str, str]],
@@ -550,6 +578,15 @@ class EnterpriseRAGService:
         )
         if on_retrieval:
             on_retrieval(retrieval)
+        # Fail closed for all enterprise routes, including catalog and QA/BUG.
+        # An unreachable repository must never look like an authoritative empty
+        # corpus, and Ollama must not improvise missing business facts.
+        if retrieval.route != "DIRECT_CHAT" and not retrieval.evidence:
+            self._emit_stage(on_stage, "EVIDENCE", "内部证据不足或检索异常 · 已阻止自由生成")
+            yield self._bounded_no_evidence(retrieval)
+            return
+        if retrieval.route != "DIRECT_CHAT" and retrieval.warnings:
+            yield "[提示：部分内部检索来源不可用，以下仅依据已成功取得的证据。]\n\n"
         self._emit_stage(
             on_stage,
             "OLLAMA",

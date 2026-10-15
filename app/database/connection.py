@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Iterator
+from typing import TYPE_CHECKING, Iterator
 
-import psycopg
-from psycopg import Connection
+if TYPE_CHECKING:
+    from psycopg import Connection
 
 from app.config.config_loader import (
     ConfigLoader,
@@ -126,6 +126,15 @@ class DatabaseConnection:
                 数据库连接失败。
         """
 
+        # A document parser or project router can load without an SQL driver;
+        # real database access still requires the genuine psycopg package.
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise DatabaseConnectionError(
+                "PostgreSQL driver unavailable; install requirements.txt (psycopg)."
+            ) from exc
+
         try:
             return psycopg.connect(
                 host=self.config.host,
@@ -138,15 +147,15 @@ class DatabaseConnection:
                 ),
             )
 
-        except psycopg.Error as exc:
+        except psycopg.Error:
             raise DatabaseConnectionError(
                 "Failed to connect to PostgreSQL. "
                 f"host={self.config.host}, "
                 f"port={self.config.port}, "
                 f"database={self.config.database}, "
                 f"user={self.config.user}. "
-                f"Reason: {exc}"
-            ) from exc
+                "Verify the database endpoint, read-only role and credentials."
+            ) from None
 
     def test_connection(
         self,
@@ -168,6 +177,13 @@ class DatabaseConnection:
         """
 
         try:
+            import psycopg
+        except ImportError as exc:
+            raise DatabaseConnectionError(
+                "PostgreSQL driver unavailable; install requirements.txt (psycopg)."
+            ) from exc
+
+        try:
             with self.connect() as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
@@ -186,11 +202,11 @@ class DatabaseConnection:
         except DatabaseConnectionError:
             raise
 
-        except psycopg.Error as exc:
+        except psycopg.Error:
             raise DatabaseConnectionError(
                 "PostgreSQL connection "
-                f"test failed: {exc}"
-            ) from exc
+                "test failed. Check PostgreSQL connectivity and permissions."
+            ) from None
 
     @contextmanager
     def connection(

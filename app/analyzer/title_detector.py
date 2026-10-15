@@ -494,6 +494,17 @@ class TitleDetector:
         ):
             return False
 
+        # A cross-reference in a table is not a numbered heading.
+        # For example, a table cell rendered by a PDF extractor as
+        # "2.9 Now Playing 参照" must remain in its containing section.
+        # This check is deliberately anchored: genuine heading titles such
+        # as "参照方法" and "参照仕様書" still pass.
+        if re.search(r"(?:\s+|を)参照(?:する|ください|下さい)?\s*$", title, re.I):
+            return False
+        if re.search(r"(?:\s+|を)(?:参照先|see\s+(?:section|chapter)\s+\d[\d.]*)\s*$",
+                     title, re.I):
+            return False
+
         if cls._contains_body_marker(
             title
         ):

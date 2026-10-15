@@ -1,4 +1,4 @@
-﻿# =========================
+# =========================
 # Python
 # =========================
 
@@ -67,26 +67,5 @@ dist/
 
 .DS_Store
 Thumbs.db
-# ===== Local / Build Artifacts =====
-.venv/
-.venv-build/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.build-temp/
-build/
-dist/
-release/
-*.log
-
-# IDE / OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Secrets
-.env
-.env.*
-!.env.example
+# Operator-owned backups (never ship in release ZIP)
+local_backups/

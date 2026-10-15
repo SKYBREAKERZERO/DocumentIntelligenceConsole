@@ -4,6 +4,7 @@ import os
 import queue
 import threading
 import time
+import webbrowser
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from tkinter import BOTH, END, LEFT, RIGHT, X, Y
@@ -27,6 +28,7 @@ from app.ai.health_policy import (
     is_valid_empty_scope,
     qabug_chunk_fanout,
 )
+from app.ai.local_webui import validate_local_webui_url, open_webui_default_browser, local_service_status
 from app.ai.ollama_client import OllamaClient, OllamaError
 from app.ai.rag_service import EnterpriseRAGService
 from app.ai.retrieval import EvidenceItem, RetrievalResult
@@ -103,9 +105,9 @@ class AIWorkspaceModule:
         self._refresh_session_list()
         self.root.after(120, self._poll_events)
         self.root.after(300, self.refresh_models)
-        self.root.after(1800, self._warmup_rag_runtime)
-        if self.settings.api_enabled:
-            self.root.after(1200, self.start_api_server)
+        # v1.04: no BGE-M3 GUI startup warmup; the independent Backend owns it.
+        # v1.04: do not start an API tied to the GUI lifetime.
+        # The dedicated backend is launched with start_backend.ps1.
 
     # ------------------------------------------------------------------
     # Variables / style
@@ -151,6 +153,8 @@ class AIWorkspaceModule:
         self.cfg_api_host = tk.StringVar(value=s.api_host)
         self.cfg_api_port = tk.StringVar(value=str(s.api_port))
         self.cfg_api_key = tk.StringVar(value=s.api_key)
+        self.cfg_external_webui_url = tk.StringVar(value=s.external_webui_url)
+        self.external_webui_status_var = tk.StringVar(value="未检查")
         self.cfg_ollama_keep_alive = tk.StringVar(value=s.ollama_keep_alive)
         self.cfg_ollama_connect_timeout = tk.StringVar(value=str(s.ollama_connect_timeout))
         self.cfg_ollama_read_timeout = tk.StringVar(value=str(s.ollama_read_timeout))
@@ -163,7 +167,7 @@ class AIWorkspaceModule:
         self.status_postgres_var = tk.StringVar(value=zh("Not checked"))
         self.status_qdrant_var = tk.StringVar(value=zh("Not checked"))
         self.status_rag_var = tk.StringVar(value=zh("Not checked"))
-        self.status_api_var = tk.StringVar(value=zh("Stopped"))
+        self.status_api_var = tk.StringVar(value="独立 Backend · 由管理工具启动时自动检查")
         self.status_detail_var = tk.StringVar(value=zh("Run health check to validate the complete AI stack."))
 
     def _configure_styles(self) -> None:
@@ -429,13 +433,18 @@ class AIWorkspaceModule:
         self._labeled_entry(collections, "COMMON", self.cfg_collection_common, 2)
         self._labeled_entry(collections, "QA/BUG", self.cfg_collection_qabug, 3)
 
-        api = ttk.LabelFrame(page, text="OpenAI-compatible Gateway（Open WebUI 可选客户端）", padding=14, bootstyle="secondary")
+        api = ttk.LabelFrame(page, text="外部 UI / Open WebUI · 本机开发者控制", padding=14, bootstyle="secondary")
         api.pack(fill=X, pady=(0, 12))
-        ttk.Checkbutton(api, text="应用启动时启用 Gateway", variable=self.cfg_api_enabled, bootstyle="round-toggle").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
-        self._labeled_entry(api, "Listen Host", self.cfg_api_host, 1)
-        self._labeled_entry(api, "Port", self.cfg_api_port, 2)
-        self._labeled_entry(api, "API Key", self.cfg_api_key, 3)
-        ttk.Label(api, text="Open WebUI Base URL: http://<host>:<port>/v1", bootstyle="secondary").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self._labeled_entry(api, "外部 WebUI 地址", self.cfg_external_webui_url, 0)
+        self._labeled_entry(api, "独立后端端口", self.cfg_api_port, 1)
+        ttk.Label(api, text="后台只监听 127.0.0.1；密钥存储在用户配置目录 local_api_token.txt / DIC_API_KEY，不显示在界面。", bootstyle="secondary").grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 6))
+        actions = ttk.Frame(api)
+        actions.grid(row=3, column=0, columnspan=2, sticky="w", pady=(5, 5))
+        ttk.Button(actions, text="系统浏览器打开", command=self.open_external_webui, bootstyle="primary-outline").pack(side=LEFT, padx=(0, 6))
+        ttk.Button(actions, text="复制网址", command=self.copy_external_webui, bootstyle="secondary-outline").pack(side=LEFT, padx=(0, 6))
+        ttk.Button(actions, text="刷新本地服务状态", command=self.refresh_external_webui_status, bootstyle="info-outline").pack(side=LEFT)
+        ttk.Label(api, textvariable=self.external_webui_status_var, wraplength=1050, justify="left", bootstyle="secondary").grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 3))
+        ttk.Label(api, text="调用模型：当前 Ollama 首选模型；Embedding：BAAI/bge-m3；知识库：PostgreSQL + Qdrant，均不允许公网访问。", bootstyle="secondary").grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         prompt = ttk.LabelFrame(page, text="企业 AI 系统 Prompt", padding=12, bootstyle="secondary")
         prompt.pack(fill=BOTH, expand=True, pady=(0, 10))
@@ -443,6 +452,45 @@ class AIWorkspaceModule:
         self.system_prompt_text.pack(fill=BOTH, expand=True)
         self.system_prompt_text.insert("1.0", self.cfg_system_prompt)
         ttk.Label(page, textvariable=self.config_status_var, bootstyle="secondary").pack(anchor="w")
+
+    def open_external_webui(self) -> None:
+        try:
+            open_webui_default_browser(self.cfg_external_webui_url.get())
+        except ValueError as exc:
+            messagebox.showerror("Open WebUI", str(exc))
+
+    def copy_external_webui(self) -> None:
+        try:
+            address = validate_local_webui_url(self.cfg_external_webui_url.get())
+            self.root.clipboard_clear()
+            self.root.clipboard_append(address)
+            self.config_status_var.set("已复制 Open WebUI 地址")
+        except ValueError as exc:
+            messagebox.showerror("Open WebUI", str(exc))
+
+    def refresh_external_webui_status(self) -> None:
+        try:
+            address = validate_local_webui_url(self.cfg_external_webui_url.get())
+            port = int(self.cfg_api_port.get())
+        except (ValueError, TypeError) as exc:
+            self.external_webui_status_var.set(f"配置错误：{exc}")
+            return
+        self.external_webui_status_var.set("检查中（后台异步，不阻塞界面）…")
+        ollama = self.cfg_ollama_url.get()
+        qdrant = self.host.qdrant_url_var.get()
+        model = self.cfg_chat_model.get().strip() or self.model_var.get().strip() or "未配置"
+        embedding = self.cfg_embedding_model.get()
+
+        def check() -> None:
+            try:
+                statuses = local_service_status(webui_url=address, api_port=port, ollama_url=ollama, qdrant_url=qdrant)
+                text = " · ".join(f"{name}: {status}" for name, status in statuses.items())
+                result = f"{text} | 首选 LLM: {model} · Embedding: {embedding}"
+            except Exception as exc:
+                result = f"检测异常：{type(exc).__name__}"
+            self.events.put(("external_webui_status", result))
+
+        threading.Thread(target=check, name="local-webui-health", daemon=True).start()
 
     @staticmethod
     def _labeled_entry(parent: ttk.Frame, label: str, variable: tk.StringVar, row: int, *, state: str = "normal") -> ttk.Entry:
@@ -576,9 +624,9 @@ class AIWorkspaceModule:
         ttk.Label(api, textvariable=self.status_api_var, font=("Microsoft YaHei UI", 10, "bold")).grid(row=0, column=0, sticky="w")
         controls = ttk.Frame(api)
         controls.grid(row=0, column=1, sticky="e")
-        ttk.Button(controls, text="Start API", command=self.start_api_server, bootstyle="success-outline").pack(side=LEFT, padx=(0, 6))
-        ttk.Button(controls, text="Stop API", command=self.stop_api_server, bootstyle="danger-outline").pack(side=LEFT)
-        ttk.Label(api, text="Endpoints: GET /health · GET /v1/models · POST /v1/chat/completions", bootstyle="secondary").grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Button(controls, text="检查独立 API", command=self.refresh_external_webui_status, bootstyle="success-outline").pack(side=LEFT, padx=(0, 6))
+        ttk.Button(controls, text="启动方法", command=self.start_api_server, bootstyle="secondary-outline").pack(side=LEFT)
+        ttk.Label(api, text="独立进程：start_backend.ps1 · GET /api/v1/health · GET /v1/models · POST /v1/chat/completions", bootstyle="secondary").grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         detail = ttk.LabelFrame(page, text="Diagnostics", padding=14, bootstyle="secondary")
         detail.pack(fill=BOTH, expand=True)
@@ -1235,7 +1283,10 @@ class AIWorkspaceModule:
                     "api_enabled": self.cfg_api_enabled.get(),
                     "api_host": self.cfg_api_host.get().strip(),
                     "api_port": int(self.cfg_api_port.get()),
-                    "api_key": self.cfg_api_key.get(),
+                    "external_webui_url": validate_local_webui_url(self.cfg_external_webui_url.get()),
+                    "api_host": "127.0.0.1",
+                    "api_enabled": False,
+                    "api_key": "",
                     "ollama_keep_alive": self.cfg_ollama_keep_alive.get().strip() or "30m",
                     "ollama_connect_timeout": float(self.cfg_ollama_connect_timeout.get()),
                     "ollama_read_timeout": float(self.cfg_ollama_read_timeout.get()),
@@ -1251,7 +1302,7 @@ class AIWorkspaceModule:
         self.settings_store.save(settings)
         self.settings = settings
         self._invalidate_rag_service()
-        self.root.after(50, self._warmup_rag_runtime)
+        # Independent backend reads the saved config after restart; avoid GUI BGE model reload.
         self.model_var.set(settings.chat_model or self.model_var.get())
         self.config_status_var.set(f"Saved: {self.settings_store.path}")
         messagebox.showinfo("AI 配置", "AI / RAG 企业配置已保存。")
@@ -1448,39 +1499,8 @@ class AIWorkspaceModule:
         self.status_thread.start()
 
     def start_api_server(self) -> None:
-        if self.api_server and self.api_server.running:
-            return
-        self.save_configuration_silent()
-        snapshot = self._snapshot()
-        self._api_snapshot = snapshot
-        self._api_current_scope = snapshot.current_scope
-        try:
-            models = list(self.model_names)
-            if not models:
-                models = [m.name for m in OllamaClient(
-                    snapshot.settings.ollama_url,
-                    connect_timeout=snapshot.settings.ollama_connect_timeout,
-                    read_timeout=snapshot.settings.ollama_read_timeout,
-                    first_load_timeout=snapshot.settings.ollama_first_load_timeout,
-                    stream_idle_timeout=snapshot.settings.ollama_stream_idle_timeout,
-                ).list_models()]
-            if not models and snapshot.settings.chat_model:
-                models = [snapshot.settings.chat_model]
-            self.api_server = OpenAICompatibleServer(
-                snapshot.settings.api_host,
-                snapshot.settings.api_port,
-                snapshot.settings.api_key,
-                service_factory=lambda: self._service_from_snapshot(self._api_snapshot or snapshot),
-                model_provider=lambda: list(models),
-                current_scope_provider=lambda: self._api_current_scope,
-            )
-            self.api_server.start()
-            self.status_api_var.set(
-                f"Running · http://{snapshot.settings.api_host}:{snapshot.settings.api_port}/v1 · API key required"
-            )
-        except Exception as exc:
-            self.status_api_var.set(f"Failed: {exc}")
-            messagebox.showerror("AI API", str(exc))
+        self.status_api_var.set("独立 Backend 由管理工具自动启动；可在 Settings 检查运行状态")
+        messagebox.showinfo("本地 API", "独立 Backend 由管理工具自动确保运行；关闭桌面不会主动关闭 API。")
 
     def stop_api_server(self) -> None:
         if self.api_server:
@@ -1520,7 +1540,10 @@ class AIWorkspaceModule:
                     "api_enabled": self.cfg_api_enabled.get(),
                     "api_host": self.cfg_api_host.get().strip(),
                     "api_port": int(self.cfg_api_port.get()),
-                    "api_key": self.cfg_api_key.get(),
+                    "external_webui_url": validate_local_webui_url(self.cfg_external_webui_url.get()),
+                    "api_host": "127.0.0.1",
+                    "api_enabled": False,
+                    "api_key": "",
                     "ollama_keep_alive": self.cfg_ollama_keep_alive.get().strip() or "30m",
                     "ollama_connect_timeout": float(self.cfg_ollama_connect_timeout.get()),
                     "ollama_read_timeout": float(self.cfg_ollama_read_timeout.get()),
@@ -1608,6 +1631,8 @@ class AIWorkspaceModule:
                     self.stop_button.configure(state="disabled")
                     self.workspace_status_var.set("AI 请求失败")
                     self.runtime_metrics_var.set(f"错误 · {payload.get('type')}: {payload.get('error')}")
+                elif kind == "external_webui_status":
+                    self.external_webui_status_var.set(str(payload))
                 elif kind == "health_item":
                     name, message, severity = payload
                     normalized = str(severity or SEVERITY_ERROR).upper()
@@ -1635,11 +1660,7 @@ class AIWorkspaceModule:
 
     def activate_page(self, page_key: str) -> None:
         if page_key == "ai_status":
-            self.status_api_var.set(
-                f"Running · http://{self.settings.api_host}:{self.settings.api_port}/v1"
-                if self.api_server and self.api_server.running
-                else "Stopped"
-            )
+            self.status_api_var.set(f"独立后台（不随 GUI 关闭） · http://127.0.0.1:{self.settings.api_port}/v1")
 
     def shutdown(self) -> None:
         self.cancel_event.set()

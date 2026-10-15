@@ -264,7 +264,7 @@ class EnterpriseRetriever:
             warning_items: list[str] = []
         except Exception as exc:
             items = []
-            warning_items = [f"Qdrant retrieval unavailable: {exc}"]
+            warning_items = [f"Qdrant retrieval unavailable: {type(exc).__name__}"]
             trace.append(f"Qdrant retrieval ERROR: {exc}")
             LOGGER.warning("Qdrant-only retrieval failed", exc_info=True)
         semantic_ms = int((time.perf_counter() - started) * 1000)
@@ -324,7 +324,7 @@ class EnterpriseRetriever:
             try:
                 semantic_items = self._semantic_search(question, scopes, cancel_check=cancel_check)
             except Exception as exc:
-                warnings.append(f"Semantic retrieval unavailable: {exc}")
+                warnings.append(f"Semantic retrieval unavailable: {type(exc).__name__}")
                 LOGGER.warning("Semantic retrieval failed", exc_info=True)
             semantic_ms = int((time.perf_counter() - started) * 1000)
 
@@ -333,7 +333,7 @@ class EnterpriseRetriever:
             try:
                 exact_items = self._sql_exact_search(question, scopes)
             except Exception as exc:
-                warnings.append(f"SQL exact retrieval unavailable: {exc}")
+                warnings.append(f"SQL exact retrieval unavailable: {type(exc).__name__}")
                 LOGGER.warning("SQL exact retrieval failed", exc_info=True)
             sql_ms = int((time.perf_counter() - started) * 1000)
 
@@ -343,7 +343,7 @@ class EnterpriseRetriever:
             try:
                 relation_items = self._relation_search(question, scopes)
             except Exception as exc:
-                warnings.append(f"Relation retrieval unavailable: {exc}")
+                warnings.append(f"Relation retrieval unavailable: {type(exc).__name__}")
                 LOGGER.warning("Relation retrieval failed", exc_info=True)
             relation_ms = int((time.perf_counter() - started) * 1000)
 
@@ -463,8 +463,8 @@ class EnterpriseRetriever:
                     f"from {min(len(queries),4)} query variant(s){filter_note}"
                 )
             except Exception as exc:
-                warnings.append(f"Semantic retrieval unavailable: {exc}")
-                trace.append(f"semantic_search: ERROR {exc}")
+                warnings.append(f"Semantic retrieval unavailable: {type(exc).__name__}")
+                trace.append(f"semantic_search: ERROR {type(exc).__name__}")
                 LOGGER.warning("Agent semantic retrieval failed", exc_info=True)
             semantic_ms = int((time.perf_counter() - started) * 1000)
 
@@ -475,8 +475,8 @@ class EnterpriseRetriever:
                     exact_items.extend(self._sql_exact_search(q, scopes))
                 trace.append(f"sql_exact_search: {len(exact_items)} candidates")
             except Exception as exc:
-                warnings.append(f"SQL exact retrieval unavailable: {exc}")
-                trace.append(f"sql_exact_search: ERROR {exc}")
+                warnings.append(f"SQL exact retrieval unavailable: {type(exc).__name__}")
+                trace.append(f"sql_exact_search: ERROR {type(exc).__name__}")
                 LOGGER.warning("Agent SQL exact retrieval failed", exc_info=True)
             sql_ms = int((time.perf_counter() - started) * 1000)
 
@@ -487,10 +487,24 @@ class EnterpriseRetriever:
                     relation_items.extend(self._relation_search(q, scopes, entity_codes=entity_codes))
                 trace.append(f"relation_search: {len(relation_items)} candidates")
             except Exception as exc:
-                warnings.append(f"Relation retrieval unavailable: {exc}")
-                trace.append(f"relation_search: ERROR {exc}")
+                warnings.append(f"Relation retrieval unavailable: {type(exc).__name__}")
+                trace.append(f"relation_search: ERROR {type(exc).__name__}")
                 LOGGER.warning("Agent relation retrieval failed", exc_info=True)
             relation_ms = int((time.perf_counter() - started) * 1000)
+
+        if "relation_search" in tool_set:
+            # Optional v7 content-level edges; legacy document graph remains
+            # authoritative where these evidence-backed units do not exist.
+            started = time.perf_counter()
+            try:
+                found = self._content_relation_search(scopes, spec_codes=entity_codes)
+                relation_items.extend(found)
+                if found:
+                    trace.append(f"content_relation_search: {len(found)} two-sided evidence pair(s)")
+            except Exception as exc:
+                warnings.append(f"Content-level graph unavailable: {type(exc).__name__}")
+                LOGGER.warning("Optional v7 content graph retrieval failed", exc_info=True)
+            relation_ms += int((time.perf_counter() - started) * 1000)
 
         if "version_search" in tool_set:
             started = time.perf_counter()
@@ -498,10 +512,22 @@ class EnterpriseRetriever:
                 version_items.extend(self._version_search(question, scopes))
                 trace.append(f"version_search: {len(version_items)} candidates")
             except Exception as exc:
-                warnings.append(f"Version retrieval unavailable: {exc}")
-                trace.append(f"version_search: ERROR {exc}")
+                warnings.append(f"Version retrieval unavailable: {type(exc).__name__}")
+                trace.append(f"version_search: ERROR {type(exc).__name__}")
                 LOGGER.warning("Agent version retrieval failed", exc_info=True)
             version_ms += int((time.perf_counter() - started) * 1000)
+
+        if "version_search" in tool_set:
+            started = time.perf_counter()
+            try:
+                detail = self._requirement_version_search(scopes, spec_codes=entity_codes)
+                version_items.extend(detail)
+                if detail:
+                    trace.append(f"requirement_version_search: {len(detail)} version-aligned source change(s)")
+            except Exception as exc:
+                warnings.append(f"Requirement-level version mapping unavailable: {type(exc).__name__}")
+                LOGGER.warning("Optional v7 requirement version mapping failed", exc_info=True)
+            version_ms += int((time.perf_counter()-started)*1000)
 
         if "unresolved_reference_search" in tool_set:
             started = time.perf_counter()
@@ -509,8 +535,8 @@ class EnterpriseRetriever:
                 unresolved_items.extend(self._unresolved_reference_search(question, scopes))
                 trace.append(f"unresolved_reference_search: {len(unresolved_items)} candidates")
             except Exception as exc:
-                warnings.append(f"Unresolved-reference retrieval unavailable: {exc}")
-                trace.append(f"unresolved_reference_search: ERROR {exc}")
+                warnings.append(f"Unresolved-reference retrieval unavailable: {type(exc).__name__}")
+                trace.append(f"unresolved_reference_search: ERROR {type(exc).__name__}")
                 LOGGER.warning("Agent unresolved reference retrieval failed", exc_info=True)
             relation_ms += int((time.perf_counter() - started) * 1000)
 
@@ -522,20 +548,25 @@ class EnterpriseRetriever:
                 warnings.extend(catalog_warnings)
                 trace.append(f"specification_catalog: {len(found)} scope result(s)")
             except Exception as exc:
-                warnings.append(f"Specification catalog unavailable: {exc}")
-                trace.append(f"specification_catalog: ERROR {exc}")
+                warnings.append(f"Specification catalog unavailable: {type(exc).__name__}")
+                trace.append(f"specification_catalog: ERROR {type(exc).__name__}")
             sql_ms += int((time.perf_counter() - started) * 1000)
 
         if "specification_lookup" in tool_set:
             started = time.perf_counter()
             try:
-                found, lookup_warnings = self._specification_lookup(question, scopes)
-                catalog_items.extend(found)
-                warnings.extend(lookup_warnings)
-                trace.append(f"specification_lookup: {len(found)} match(es)")
+                # Title discovery accepts alternate orthographies/translations,
+                # but a hit is only a candidate with real SQL identity metadata.
+                for q in queries[:4]:
+                    if cancel_check and cancel_check():
+                        break
+                    found, lookup_warnings = self._specification_lookup(q, tuple(x for x in scopes if x != "QABUG"))
+                    catalog_items.extend(found)
+                    warnings.extend(lookup_warnings)
+                trace.append(f"specification_lookup: {len(catalog_items)} SQL identity candidate(s)")
             except Exception as exc:
-                warnings.append(f"Specification lookup unavailable: {exc}")
-                trace.append(f"specification_lookup: ERROR {exc}")
+                warnings.append(f"Specification lookup unavailable: {type(exc).__name__}")
+                trace.append(f"specification_lookup: ERROR {type(exc).__name__}")
             sql_ms += int((time.perf_counter() - started) * 1000)
 
         if "issue_search" in tool_set or "issue_statistics" in tool_set:
@@ -549,8 +580,8 @@ class EnterpriseRetriever:
                     issue_items.extend(self._issue_sql_search(question, scopes, issue_filters))
                     trace.append(f"issue_search: {len(issue_items)} candidate(s)")
             except Exception as exc:
-                warnings.append(f"Issue retrieval unavailable: {exc}")
-                trace.append(f"issue retrieval: ERROR {exc}")
+                warnings.append(f"Issue retrieval unavailable: {type(exc).__name__}")
+                trace.append(f"issue retrieval: ERROR {type(exc).__name__}")
             sql_ms += int((time.perf_counter() - started) * 1000)
 
         # Keep a wider candidate pool for governance/reranking upstream.
@@ -858,8 +889,8 @@ class EnterpriseRetriever:
                 )
                 trace.append(f"issue_semantic_search: {len(semantic_items)} candidate(s)")
             except Exception as exc:
-                warnings.append(f"Issue semantic retrieval unavailable: {exc}")
-                trace.append(f"issue_semantic_search: ERROR {exc}")
+                warnings.append(f"Issue semantic retrieval unavailable: {type(exc).__name__}")
+                trace.append(f"issue_semantic_search: ERROR {type(exc).__name__}")
             semantic_ms = int((time.perf_counter() - sem_started) * 1000)
 
         merged = self._fuse_issue_candidates(sql_items, semantic_items, mode=mode)
@@ -979,7 +1010,7 @@ class EnterpriseRetriever:
                         f"vector={size}/{distance}; payload_indexes={','.join(payload_names) if payload_names else '(none)'}"
                     )
             except Exception as exc:
-                warnings.append(f"Qdrant runtime introspection unavailable: {exc}")
+                warnings.append(f"Qdrant runtime introspection unavailable: {type(exc).__name__}")
 
         # SQL metadata is read only from pg_catalog/known schema tables. Never
         # execute SQL supplied by the user.
@@ -1038,7 +1069,7 @@ class EnterpriseRetriever:
                         f"schema_versions={'; '.join(versions) if versions else '-'}"
                     )
                 except Exception as exc:
-                    warnings.append(f"{sql_scope} PostgreSQL runtime introspection unavailable: {exc}")
+                    warnings.append(f"{sql_scope} PostgreSQL runtime introspection unavailable: {type(exc).__name__}")
 
         elapsed = int((time.perf_counter() - started) * 1000)
         evidence = EvidenceItem(
@@ -1094,7 +1125,7 @@ class EnterpriseRetriever:
                     )
                     rows = [dict(row) for row in cur.fetchall()]
             except Exception as exc:
-                warnings.append(f"{scope} specification catalog unavailable: {exc}")
+                warnings.append(f"{scope} specification catalog unavailable: {type(exc).__name__}")
                 continue
             if count_only:
                 content = f"{scope} 当前已注册式样书数量：{len(rows)}。"
@@ -1209,7 +1240,7 @@ class EnterpriseRetriever:
                     )
                     rows = [dict(row) for row in cur.fetchall()]
             except Exception as exc:
-                warnings.append(f"{scope} specification lookup unavailable: {exc}")
+                warnings.append(f"{scope} specification lookup unavailable: {type(exc).__name__}")
                 continue
 
             for row in rows:
@@ -1607,8 +1638,8 @@ class EnterpriseRetriever:
                 )
                 rows=[dict(row) for row in cur.fetchall()]
         except Exception:
-            LOGGER.debug("Dedicated QA/BUG SQL retrieval skipped", exc_info=True)
-            return []
+            LOGGER.warning("Dedicated QA/BUG SQL source unavailable", exc_info=True)
+            raise RuntimeError("Authoritative QA/BUG SQL retrieval unavailable") from None
         result=[]
         exact_key = bool(str(filters.get("issue_key") or "").strip())
         search_terms = [t.lower() for t in self._tokens(question)]
@@ -1700,8 +1731,8 @@ class EnterpriseRetriever:
                     )
                     breakdowns["monthly_trend"]=[(str(x["key"]),int(x["count"])) for x in cur.fetchall()]
         except Exception:
-            LOGGER.debug("Dedicated QA/BUG statistics retrieval skipped",exc_info=True)
-            return []
+            LOGGER.warning("Dedicated QA/BUG SQL statistics unavailable", exc_info=True)
+            raise RuntimeError("Authoritative QA/BUG statistics unavailable") from None
         filter_text=", ".join(f"{k}={v}" for k,v in filters.items()) or "none"
         lines=[f"QABUG exact statistics (filters: {filter_text})",f"Total logical records: {total}"]
         for label,values in breakdowns.items():
@@ -1719,7 +1750,7 @@ class EnterpriseRetriever:
         filters: dict[str, str],
     ) -> list[EvidenceItem]:
         scope_tuple = tuple(scopes)
-        if scope_tuple == ("QABUG",):
+        if "QABUG" in scope_tuple:
             return self._qabug_issue_sql_search(question, filters)
         """Return one governed evidence item per logical QA/BUG issue row.
 
@@ -1728,6 +1759,8 @@ class EnterpriseRetriever:
         in lists and exact-key answers while preserving the full row evidence.
         """
         result: list[EvidenceItem] = []
+        successful_scopes = 0
+        failed_scopes = 0
         generic_stop = {"jira", "bug", "qa", "issue", "ticket", "缺陷", "问题", "問題", "多少", "哪些", "现在", "目前"}
         tokens = [t for t in self._tokens(question) if t.lower() not in generic_stop and t not in generic_stop]
         use_tokens = [] if filters else tokens
@@ -1772,8 +1805,10 @@ class EnterpriseRetriever:
                     )
                     rows = [dict(row) for row in cur.fetchall()]
             except Exception:
-                LOGGER.debug("Issue SQL retrieval skipped for scope=%s", scope, exc_info=True)
+                failed_scopes += 1
+                LOGGER.warning("Issue SQL retrieval unavailable for scope=%s", scope, exc_info=True)
                 continue
+            successful_scopes += 1
 
             grouped: dict[str, list[dict[str, Any]]] = {}
             order: list[str] = []
@@ -1821,6 +1856,8 @@ class EnterpriseRetriever:
                 )
                 if len(result) >= max(self.top_k * 3, 30):
                     return result
+        if failed_scopes and not successful_scopes:
+            raise RuntimeError("Issue SQL retrieval unavailable in all selected scopes")
         return result[: max(self.top_k * 3, 30)]
 
     def _issue_statistics(
@@ -1830,7 +1867,7 @@ class EnterpriseRetriever:
         filters: dict[str, str],
     ) -> list[EvidenceItem]:
         scope_tuple = tuple(scopes)
-        if scope_tuple == ("QABUG",):
+        if "QABUG" in scope_tuple:
             return self._qabug_issue_statistics(question, filters)
         """Compute exact logical-issue counts instead of chunk counts.
 
@@ -2154,6 +2191,8 @@ class EnterpriseRetriever:
         tokens = self._tokens(question)
         result: list[EvidenceItem] = []
         for scope in scopes:
+            if scope == "QABUG":
+                continue
             clauses: list[str] = []
             params: list[Any] = []
             for token in tokens[:5]:
@@ -2337,6 +2376,8 @@ class EnterpriseRetriever:
 
         client = self._get_qdrant_client()
         hits_by_scope: dict[str, list[Any]] = {}
+        missing_collections: list[str] = []
+        checked_collections = 0
         if stage_callback:
             stage_callback("QDRANT", "正在检索 Current Qdrant collection…", 0)
         qstarted = time.perf_counter()
@@ -2347,7 +2388,9 @@ class EnterpriseRetriever:
             if not collection:
                 continue
             if not self._collection_exists(client, collection):
+                missing_collections.append(scope)
                 continue
+            checked_collections += 1
             query_filter = self._semantic_filter(
                 scope, entity_codes, artifact_type=artifact_type, issue_key=issue_key,
                 field_filters=field_filters,
@@ -2383,6 +2426,8 @@ class EnterpriseRetriever:
                 if float(getattr(hit, "score", 0.0) or 0.0) >= self.min_score
             ]
         metrics["qdrant_ms"] = int((time.perf_counter() - qstarted) * 1000)
+        if not checked_collections and missing_collections:
+            raise RuntimeError("Qdrant collection missing in all requested scopes: " + ", ".join(missing_collections))
         total_hits = sum(len(values) for values in hits_by_scope.values())
         if stage_callback:
             stage_callback("QDRANT", f"Qdrant 命中 {total_hits} 条 · {metrics['qdrant_ms']} ms", metrics["qdrant_ms"])
@@ -2553,7 +2598,11 @@ class EnterpriseRetriever:
         if not tokens:
             return []
         result: list[EvidenceItem] = []
+        successful_scopes = 0
+        failed_scopes = 0
         for scope in scopes:
+            if scope == "QABUG":
+                continue
             clauses: list[str] = []
             params: list[Any] = []
             for token in tokens:
@@ -2582,12 +2631,16 @@ class EnterpriseRetriever:
                     cur.execute(sql, tuple(params + [tokens, self.top_k]))
                     rows = [dict(row) for row in cur.fetchall()]
             except Exception:
-                LOGGER.debug("SQL exact retrieval skipped for scope=%s", scope, exc_info=True)
+                failed_scopes += 1
+                LOGGER.debug("SQL exact retrieval unavailable for scope=%s", scope, exc_info=True)
                 continue
+            successful_scopes += 1
             for row in rows:
                 result.append(self._chunk_to_evidence(scope, row, "SQL_EXACT", None, {}))
                 if len(result) >= self.top_k:
                     return result
+        if failed_scopes and not successful_scopes:
+            raise RuntimeError("SQL exact search unavailable in every authorized specification scope")
         return result[: self.top_k]
 
     def _relation_registry_rows(self, scope: str, *, spec_codes: tuple[str, ...] = ()) -> list[dict[str, Any]]:
@@ -2751,6 +2804,159 @@ class EnterpriseRetriever:
         if clean_code and clean_name and clean_code.casefold() not in clean_name.casefold():
             return f"{clean_code} {clean_name}"
         return clean_name or clean_code or str(fallback or "Unresolved target").strip()
+
+    def _requirement_version_search(
+        self, scopes: Iterable[str], *, spec_codes: tuple[str, ...] = (),
+    ) -> list[EvidenceItem]:
+        """Return exact old/new source spans for persisted v7 revision mappings."""
+        evidence = []
+        if not spec_codes:
+            return evidence  # require explicit root for version-level provenance
+        for scope in scopes:
+            if scope not in {"21MM", "24MM"}:
+                continue
+            with self._connect(scope) as conn, conn.cursor() as cur:
+                cur.execute("SELECT to_regclass('public.ei_version_mappings') AS table_name")
+                if not (cur.fetchone() or {}).get('table_name'):
+                    continue
+                cur.execute(
+                    """
+                    SELECT vm.id, vm.change_type, vm.review_status, vm.similarity,
+                           sp.spec_code, ov.version_label AS old_version, nv.version_label AS new_version,
+                           ou.document_id AS old_doc,ou.content_id AS old_content_id,ou.section_id AS old_section,
+                           ou.raw_text AS old_text,ou.start_offset AS old_offset,ou.page_number AS old_page,
+                           nu.document_id AS new_doc,nu.content_id AS new_content_id,nu.section_id AS new_section,
+                           nu.raw_text AS new_text,nu.start_offset AS new_offset,nu.page_number AS new_page
+                    FROM public.ei_version_mappings vm
+                    JOIN public.specification_versions ov ON ov.id=vm.source_version_id
+                    JOIN public.specification_versions nv ON nv.id=vm.target_version_id
+                    JOIN public.specifications sp ON sp.id=ov.specification_id
+                    LEFT JOIN public.ei_requirement_units ou ON ou.id=vm.old_unit_id
+                    LEFT JOIN public.ei_requirement_units nu ON nu.id=vm.new_unit_id
+                    WHERE vm.change_type <> 'UNCHANGED'
+                      AND (%s::TEXT[] IS NULL OR sp.spec_code = ANY(%s::TEXT[]))
+                    ORDER BY vm.id DESC LIMIT %s
+                    """, (list(spec_codes) if spec_codes else None,
+                           list(spec_codes) if spec_codes else None,
+                           min(20, max(self.top_k*2, 8))),
+                )
+                for item in cur.fetchall():
+                    grade = str(item['review_status'])
+                    label = 'REVIEW REQUIRED' if grade == 'REVIEW_REQUIRED' else grade
+                    evidence.append(EvidenceItem(
+                        evidence_id='', scope=scope, source_type='REQUIREMENT_VERSION_CHANGE',
+                        score=0.8 if grade == 'DETERMINISTIC' else 0.5,
+                        content=(
+                            f"[{label}] {item['spec_code']} {item['old_version']} -> {item['new_version']} "
+                            f"{item['change_type']} similarity={item['similarity']}\n"
+                            f"Old §{item['old_section'] or '-'}: {str(item['old_text'] or '')[:1600]}\n"
+                            f"New §{item['new_section'] or '-'}: {str(item['new_text'] or '')[:1600]}"
+                        ),
+                        document_id=str(item['new_doc'] or item['old_doc'] or ''),
+                        content_id=item['new_content_id'] or item['old_content_id'],
+                        specification_code=str(item['spec_code'] or ''),
+                        specification_version=str(item['new_version']),
+                        section_id=str(item['new_section'] or item['old_section'] or ''),
+                        page_number=item['new_page'] or item['old_page'],
+                        metadata={
+                            'change_type':item['change_type'], 'review_status':grade,
+                            'old_evidence':{'document_id':item['old_doc'], 'content_id':item['old_content_id'],
+                                            'section_id':item['old_section'],'start_offset':item['old_offset']},
+                            'new_evidence':{'document_id':item['new_doc'], 'content_id':item['new_content_id'],
+                                            'section_id':item['new_section'],'start_offset':item['new_offset']},
+                        },
+                    ))
+        return evidence
+
+    def _content_relation_search(
+        self, scopes: Iterable[str], *, spec_codes: tuple[str, ...] = (),
+    ) -> list[EvidenceItem]:
+        """Read bounded, provenance-linked requirement relations from v7 SQL.
+
+        Never assert an unreviewed edge as an approved engineering dependency;
+        each returned item carries both exact source spans and version identities.
+        """
+        result: list[EvidenceItem] = []
+        if not spec_codes:
+            return result  # no broad, irrelevant v7 graph fanout
+        for scope in scopes:
+            if scope not in {"21MM", "24MM"}:
+                continue
+            with self._connect(scope) as conn, conn.cursor() as cur:
+                cur.execute("SELECT to_regclass('public.ei_content_relations')")
+                if not (cur.fetchone() or {}).get('to_regclass'):
+                    continue
+                # Scope is a configured profile (not interpolated SQL), and the
+                # optional codes are parameterized. Current revisions only.
+                cur.execute(
+                    """
+                    SELECT rel.id, rel.relation_type, rel.score, rel.status, rel.rationale,
+                           src.spec_code AS source_code, tgt.spec_code AS target_code,
+                           su.document_id AS source_document, su.content_id AS source_content_id,
+                           su.section_id AS source_section, su.page_number AS source_page,
+                           su.start_offset AS source_start, su.end_offset AS source_end,
+                           su.raw_text AS source_text, sv.version_label AS source_version,
+                           tu.document_id AS target_document, tu.content_id AS target_content_id,
+                           tu.section_id AS target_section, tu.page_number AS target_page,
+                           tu.start_offset AS target_start, tu.end_offset AS target_end,
+                           tu.raw_text AS target_text, tv.version_label AS target_version
+                    FROM public.ei_content_relations rel
+                    JOIN public.ei_requirement_units su ON su.id=rel.source_unit_id
+                    JOIN public.ei_requirement_units tu ON tu.id=rel.target_unit_id
+                    JOIN public.specifications src ON src.id=su.specification_id
+                    JOIN public.specifications tgt ON tgt.id=tu.specification_id
+                    JOIN public.specification_versions sv ON sv.id=su.version_id
+                    JOIN public.specification_versions tv ON tv.id=tu.version_id
+                    WHERE rel.status IN ('CONFIRMED','REVIEW_REQUIRED')
+                      AND su.version_id=src.current_version_id
+                      AND tu.version_id=tgt.current_version_id
+                      AND (%s::TEXT[] IS NULL OR src.spec_code=ANY(%s::TEXT[]) OR tgt.spec_code=ANY(%s::TEXT[]))
+                    ORDER BY CASE rel.status WHEN 'CONFIRMED' THEN 0 ELSE 1 END,
+                             rel.score DESC, rel.id
+                    LIMIT %s
+                    """,
+                    (list(spec_codes) if spec_codes else None,
+                     list(spec_codes) if spec_codes else None,
+                     list(spec_codes) if spec_codes else None,
+                     min(30, max(self.top_k * 3, 8))),
+                )
+                for row in cur.fetchall():
+                    md = {
+                        'status': row['status'], 'relation_type': row['relation_type'],
+                        'source': {
+                            'document_id': row['source_document'], 'content_id': row['source_content_id'],
+                            'version': row['source_version'], 'section_id': row['source_section'],
+                            'page_number': row['source_page'], 'start_offset': row['source_start'],
+                            'end_offset': row['source_end'],
+                        },
+                        'target': {
+                            'document_id': row['target_document'], 'content_id': row['target_content_id'],
+                            'version': row['target_version'], 'section_id': row['target_section'],
+                            'page_number': row['target_page'], 'start_offset': row['target_start'],
+                            'end_offset': row['target_end'],
+                        },
+                    }
+                    label = "CONFIRMED" if row['status'] == 'CONFIRMED' else "UNREVIEWED CANDIDATE - NOT VERIFIED"
+                    text = (
+                        f"[{label}] {row['source_code']} v{row['source_version']} "
+                        f"§{row['source_section']} → {row['target_code']} v{row['target_version']} "
+                        f"§{row['target_section']} ({row['relation_type']})\n"
+                        f"Source verbatim: {str(row['source_text'])[:1800]}\n"
+                        f"Target verbatim: {str(row['target_text'])[:1800]}\n"
+                        f"Basis: {row['rationale']}"
+                    )
+                    result.append(EvidenceItem(
+                        evidence_id='', scope=scope, source_type='CONTENT_RELATION',
+                        content=text, score=float(row['score']) if row['status']=='CONFIRMED' else 0.25,
+                        content_id=int(row['source_content_id']),
+                        document_id=str(row['source_document']),
+                        specification_code=str(row['source_code'] or ''),
+                        specification_version=str(row['source_version'] or ''),
+                        section_id=str(row['source_section'] or ''),
+                        page_number=row['source_page'],
+                        relation_id=int(row['id']), metadata=md,
+                    ))
+        return result
 
     def _relation_search(
         self,

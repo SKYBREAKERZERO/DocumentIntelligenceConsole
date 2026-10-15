@@ -43,8 +43,6 @@ from pathlib import Path
 from PyInstaller.utils.hooks import (
     collect_all,
     collect_submodules,
-    collect_data_files,
-    copy_metadata,
 )
 
 
@@ -325,9 +323,8 @@ safe_collect_package("et_xmlfile")
 
 safe_collect_package("psycopg")
 
-# psycopg-binary is an implementation backend loaded by psycopg.
-# Do NOT import/collect psycopg_binary directly; that package intentionally
-# raises when imported before psycopg and only creates noisy build warnings.
+# psycopg[binary] optimized implementation.
+safe_collect_package("psycopg_binary")
 
 
 # ============================================================
@@ -337,60 +334,13 @@ safe_collect_package("psycopg")
 safe_collect_package("yaml")
 safe_collect_package("qdrant_client")
 
-# Full AI semantic-retrieval runtime for the Windows executable, but DO NOT
-# collect_all(torch/transformers). collect_all() walks distributed, testing,
-# CUDA, ONNX, CLI and every Transformers model family and makes the build
-# needlessly slow/large. The regular PyInstaller hooks handle native torch
-# binaries; we add only the dynamic modules used by SentenceTransformer +
-# BAAI/bge-m3 (XLM-R based).
-for _pkg in ("sentence_transformers", "transformers"):
-    try:
-        datas += collect_data_files(_pkg, include_py_files=False)
-    except Exception as exc:
-        print(f"[PyInstaller] Unable to collect data for '{_pkg}': {exc}")
-
-for _dist in (
-    "sentence-transformers",
-    "transformers",
-    "tokenizers",
-    "safetensors",
-    "huggingface-hub",
-    "torch",
-):
-    try:
-        datas += copy_metadata(_dist)
-    except Exception as exc:
-        print(f"[PyInstaller] Unable to copy metadata for '{_dist}': {exc}")
-
-hiddenimports += [
-    # Sentence-Transformers runtime used by app.embedding.embedding_client
-    "sentence_transformers",
-    "sentence_transformers.SentenceTransformer",
-    "sentence_transformers.models",
-    "sentence_transformers.models.Transformer",
-    "sentence_transformers.models.Pooling",
-    "sentence_transformers.models.Normalize",
-    "sentence_transformers.util",
-
-    # Hugging Face runtime and the model family used by BAAI/bge-m3.
-    "transformers",
-    "transformers.models.auto.configuration_auto",
-    "transformers.models.auto.modeling_auto",
-    "transformers.models.auto.tokenization_auto",
-    "transformers.models.xlm_roberta",
-    "transformers.models.xlm_roberta.configuration_xlm_roberta",
-    "transformers.models.xlm_roberta.modeling_xlm_roberta",
-    "transformers.models.xlm_roberta.tokenization_xlm_roberta",
-    "transformers.models.xlm_roberta.tokenization_xlm_roberta_fast",
-
-    # Native/runtime dependencies. Standard PyInstaller hooks collect their
-    # required binaries; we intentionally do not enumerate all submodules.
-    "torch",
-    "tokenizers",
-    "safetensors",
-    "safetensors.torch",
-    "huggingface_hub",
-]
+# Full AI semantic-retrieval runtime for the Windows executable.
+safe_collect_package("sentence_transformers")
+safe_collect_package("transformers")
+safe_collect_package("tokenizers")
+safe_collect_package("safetensors")
+safe_collect_package("huggingface_hub")
+safe_collect_package("torch")
 
 safe_collect_package("keyring")
 safe_collect_package("sqlparse")
@@ -452,8 +402,7 @@ hiddenimports += [
     "win32com.client.makepy",
 ]
 
-# Explicit COM modules above are sufficient for legacy PowerPoint conversion.
-# Do not collect all win32com demos/tests/ADSI/debug modules.
+safe_collect_submodules("win32com")
 
 
 # ============================================================
@@ -604,27 +553,6 @@ analysis = Analysis(
         # Legacy PostgreSQL Driver
         # ====================================================
         "psycopg2",
-
-        # ====================================================
-        # Heavy development/training stacks not used by BGE-M3 inference
-        # ====================================================
-        "torch.testing",
-        "torch.distributed",
-        "torch.onnx",
-        "torch._inductor",
-        "torch.profiler",
-        "torch.utils.benchmark",
-        "transformers.cli",
-        "transformers.testing_utils",
-
-        # pywin32 optional/demo/test families; PowerPoint conversion only needs
-        # win32com.client + pythoncom/pywintypes.
-        "win32com.test",
-        "win32com.demos",
-        "win32com.axdebug",
-        "win32com.axscript",
-        "win32com.adsi",
-        "win32com.directsound",
     ],
 
     noarchive=False,
