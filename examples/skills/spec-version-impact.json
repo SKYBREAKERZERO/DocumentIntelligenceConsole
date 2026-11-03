@@ -1,0 +1,26 @@
+{
+  "old": {
+    "project": "21MM",
+    "spec_code": "550",
+    "version_id": 250,
+    "document_id": "doc550",
+    "file_name": "Bluetooth Audio function spec v2.52.pdf",
+    "document_role": "SPEC_BODY",
+    "content_id": 17,
+    "section_id": "4.1",
+    "page_number": 31,
+    "text": "When ignition is ON, Bluetooth audio shall be ready within 800ms."
+  },
+  "new": {
+    "project": "21MM",
+    "spec_code": "550",
+    "version_id": 252,
+    "document_id": "doc550",
+    "file_name": "Bluetooth Audio function spec v2.52.pdf",
+    "document_role": "SPEC_BODY",
+    "content_id": 17,
+    "section_id": "4.1",
+    "page_number": 31,
+    "text": "When ignition is ON, Bluetooth audio shall be ready within 500ms."
+  }
+}

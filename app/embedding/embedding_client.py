@@ -433,6 +433,7 @@ class EmbeddingClient:
         try:
             model = SentenceTransformer(
                 self.config.model_name,
+                local_files_only=True,
                 device=self.config.device,
                 trust_remote_code=(
                     self.config

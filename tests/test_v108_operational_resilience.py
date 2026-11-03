@@ -234,4 +234,4 @@ def test_preserves_sql_and_qdrant_schema_and_tracks_current_api_version():
     assert create_app(FakeRuntime(), KEY).version == "1.20"
     assert (root / "database" / "upgrade_engineering_intelligence_v7.sql").is_file()
     assert (root / "scripts" / "qdrant_loopback_rebind.ps1").is_file()
-    assert (root / "README.md").read_text(encoding="utf-8").startswith("# DocumentIntelligenceConsole Enterprise v1.30")
+    assert (root / "README.md").read_text(encoding="utf-8").startswith("# DocumentIntelligenceConsole Enterprise v1.54")

@@ -316,21 +316,18 @@ def backfill_content_relations(cur: Any, *, source_specification_id: int, source
     catalog: dict[str, list[tuple[int,int]]] = defaultdict(list)
     for sid, code, vid in cur.fetchall():
         catalog[str(code).upper()].append((int(sid), int(vid)))
-    from .relations import _SPEC_REFERENCE, _SECTION_REFERENCE
+    from .relations import extract_reference_anchors
     anchors: dict[tuple[str, str], dict[str, RequirementUnit]] = defaultdict(dict)
     ambiguous_catalog = 0
     for unit in source_units:
-        refs = list(_SPEC_REFERENCE.finditer(unit.text))
-        for i, match in enumerate(refs):
-            code = match.group('code').upper()
-            segment_end = refs[i + 1].start() if i + 1 < len(refs) else len(unit.text)
-            section = _SECTION_REFERENCE.search(unit.text[match.end():segment_end])
-            if not section or code not in catalog:
+        for anchor in extract_reference_anchors(unit.text):
+            code = anchor.specification_code
+            if code not in catalog:
                 continue
             if len(catalog[code]) != 1:
                 ambiguous_catalog += 1
                 continue
-            anchors[(code, section.group(1))][unit.unit_key] = unit
+            anchors[(code, anchor.section_id)][unit.unit_key] = unit
 
     generated = 0
     unresolved = 0

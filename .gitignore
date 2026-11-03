@@ -69,3 +69,28 @@ dist/
 Thumbs.db
 # Operator-owned backups (never ship in release ZIP)
 local_backups/
+# Local live acceptance responses can contain enterprise source bodies.
+/live_acceptance/
+
+# Local state, credentials, models and generated release artifacts
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.bak
+*.private
+*.zip
+*.safetensors
+*.gguf
+*.pt
+*.pth
+local_api_token.txt
+ai_config.json
+console_profile.json
+backend_spawn.json
+backend_spawn.lock
+config.local.yaml
+/docs/acceptance/
+/sample_specs/
+/RELEASE_*_MANIFEST.sha256
+/RELEASE_*_VALIDATION.json

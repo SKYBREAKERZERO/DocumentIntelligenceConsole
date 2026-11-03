@@ -116,6 +116,11 @@ def _table_cells(line: str) -> tuple[tuple[int, int, str], ...]:
         segment = line[left:right]
         start = left + len(segment) - len(segment.lstrip())
         end = right - (len(segment) - len(segment.rstrip()))
+        # A whitespace-only table cell has no literal payload. Represent its
+        # empty span at the cell boundary; lstrip/rstrip otherwise cross and
+        # produce an invalid reversed coordinate pair.
+        if start > end:
+            start = end = left
         cells.append((start, end, line[start:end]))
     # Surrounding pipes are table formatting rather than actual blank cells.
     if line.lstrip().startswith(("|", "│")) and cells and not cells[0][2]:

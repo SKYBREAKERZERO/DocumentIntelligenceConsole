@@ -1,0 +1,18 @@
+{
+  "name": "spec-requirement-extraction",
+  "stage": "Stage 1",
+  "capability": "REQUIREMENT_SPANS_ONLY",
+  "input_keys": [
+    "document_id",
+    "content_id",
+    "section_id",
+    "text",
+    "file_name",
+    "document_role"
+  ],
+  "auto_execution": false,
+  "runtime": "bounded_python_tool",
+  "network": "OFF",
+  "database_write": false,
+  "production_acceptance": "NOT_ASSESSED"
+}

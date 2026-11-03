@@ -1,0 +1,13 @@
+{
+  "name": "rag-quality-gate",
+  "stage": "Stage 7",
+  "capability": "OFFLINE_EVALUATION_ONLY",
+  "input_keys": [
+    "cases"
+  ],
+  "auto_execution": false,
+  "runtime": "bounded_python_tool",
+  "network": "OFF",
+  "database_write": false,
+  "production_acceptance": "NOT_ASSESSED"
+}

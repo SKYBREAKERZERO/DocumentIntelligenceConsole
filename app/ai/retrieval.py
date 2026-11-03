@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import logging
+import math
+import os
 import re
 import time
 from collections import OrderedDict
@@ -10,7 +13,12 @@ from typing import Any, Callable, Iterable
 
 from app.enterprise.profiles import PostgresProfile, QdrantProfile
 from app.relations.graph_service import EngineeringRelationGraphService
+from app.engineering_intelligence.temporal_query import (
+    parse_temporal_audit_ids, choose_audit_scope,
+)
 from app.storage.primary_document_policy import PrimarySpecificationDocumentPolicy
+from app.ai.hybrid_retrieval import fuse_spec_rrf
+from app.skills.live_workflows import build_live_skill_workflow, issue_symptom_queries
 
 LOGGER = logging.getLogger("document_intelligence_console.ai.retrieval")
 
@@ -45,6 +53,14 @@ class EvidenceItem:
         location = self.section_title or self.section_id
         if location:
             spec = f"{spec} · {location}"
+        if self.source_type in {"SQL_EXACT", "SEMANTIC", "QDRANT", "HYBRID_CHUNK", "QDRANT_SPARSE", "CONFIGURED_CHECK_SOURCE"}:
+            page = self.page_number if self.page_number is not None else "PAGE_UNKNOWN"
+            spec += f" · PDF页={page} · content_id={self.content_id if self.content_id is not None else 'UNKNOWN'}"
+            if self.file_name:
+                spec += f" · 源文件={self.file_name}"
+            content_hash = str(self.metadata.get("content_hash") or "").strip()
+            if content_hash:
+                spec += f" · SHA256={content_hash}"
         return f"{self.scope} · {spec}"
 
 
@@ -73,6 +89,15 @@ class RetrievalResult:
     embedding_ms: int = 0
     qdrant_ms: int = 0
     hydration_ms: int = 0
+    # Display-only suggestions. NEVER passed to EvidenceGovernor/model context.
+    candidate_suggestions: tuple[EvidenceItem, ...] = ()
+    # IDs actually admitted by the bounded prompt assembler; not parsed from
+    # untrusted source text that can contain fake "[2] | source=" headings.
+    prompt_evidence_ids: tuple[str, ...] = ()
+    workflow: dict[str, Any] = field(default_factory=dict)
+
+
+ISSUE_OBSERVATION_SECTIONS=frozenset({"SUMMARY","DESCRIPTION","BUG_PHENOMENON","BUG_ACTUAL_RESULT","QA_ACTUAL_BEHAVIOR"})
 
 
 class EnterpriseRetriever:
@@ -98,6 +123,8 @@ class EnterpriseRetriever:
         self.vector_dimension = int(vector_dimension)
         self.top_k = max(1, min(int(top_k), 30))
         self.min_score = float(min_score)
+        self.sparse_enabled = os.environ.get("DIC_STAGE4_SPARSE_ENABLED", "0") == "1"
+        self._sparse_encoder: Any | None = None
         self._embedding_client: Any | None = None
         self._embedding_lock = RLock()
         self._embedding_cache: OrderedDict[str, tuple[float, ...]] = OrderedDict()
@@ -297,6 +324,8 @@ class EnterpriseRetriever:
             request_id="rag-" + uuid.uuid4().hex[:16],
             route="QDRANT_RAG",
             knowledge_source="QDRANT_ONLY",
+            # Retrieved candidates do not by themselves prove a complete answer.
+            evidence_strength="LIMITED" if items else "NONE",
             embedding_ms=int(metrics.get("embedding_ms", 0)),
             qdrant_ms=int(metrics.get("qdrant_ms", 0)),
             hydration_ms=int(metrics.get("hydration_ms", 0)),
@@ -315,6 +344,7 @@ class EnterpriseRetriever:
         normalized_mode = str(mode or "Hybrid").strip().lower()
         warnings: list[str] = []
         semantic_items: list[EvidenceItem] = []
+        sparse_items: list[EvidenceItem] = []
         exact_items: list[EvidenceItem] = []
         relation_items: list[EvidenceItem] = []
         semantic_ms = sql_ms = relation_ms = 0
@@ -349,7 +379,27 @@ class EnterpriseRetriever:
 
         merged: list[EvidenceItem] = []
         seen: set[tuple[str, str, int | None]] = set()
-        for item in [*relation_items, *semantic_items, *exact_items]:
+        sparse_items: list[EvidenceItem] = []
+        if normalized_mode == "hybrid" and getattr(self, "sparse_enabled", False):
+            try:
+                sparse_items = self._sparse_search(question, scopes)
+            except Exception as exc:
+                warnings.append(f"Stage 4 Sparse unavailable: {type(exc).__name__}")
+                LOGGER.warning("Optional Sparse hybrid retrieval failed", exc_info=True)
+        if normalized_mode == "hybrid" and (sparse_items or (semantic_items and exact_items)):
+            spec_candidates = fuse_spec_rrf(
+                exact_items, semantic_items, sparse_hits=sparse_items,
+                max_candidates=max(self.top_k * 4, 32),
+            )
+        else:
+            spec_candidates = [*semantic_items, *exact_items]
+        if (normalized_mode == "hybrid" and spec_candidates
+                and os.environ.get("DIC_STAGE4_RERANK_ENABLED", "0") == "1"):
+            from app.ai.stage4_reranker import rerank_spec_chunks
+            spec_candidates, rerank_status = rerank_spec_chunks(question, spec_candidates)
+            if rerank_status.state in {"FAILED", "TIMEOUT", "BUSY"}:
+                warnings.append(f"Optional Stage 4 reranker: {rerank_status.state}; original ranks preserved")
+        for item in [*relation_items, *spec_candidates]:
             key = (item.scope, item.source_type, item.content_id if item.content_id is not None else item.relation_id)
             if key in seen:
                 continue
@@ -436,15 +486,48 @@ class EnterpriseRetriever:
         warnings: list[str] = []
         trace: list[str] = []
         semantic_items: list[EvidenceItem] = []
+        sparse_items: list[EvidenceItem] = []
         exact_items: list[EvidenceItem] = []
         relation_items: list[EvidenceItem] = []
         version_items: list[EvidenceItem] = []
         unresolved_items: list[EvidenceItem] = []
         catalog_items: list[EvidenceItem] = []
         issue_items: list[EvidenceItem] = []
+        candidate_suggestions: list[EvidenceItem] = []
         semantic_ms = sql_ms = relation_ms = version_ms = 0
         queries = tuple(dict.fromkeys(q.strip() for q in rewritten_queries if q.strip())) or (question,)
         entity_codes = self._entity_spec_codes(entities, question)
+        # Exact Stage 3 audit is its own terminal, single-database read path.
+        # Do not mix newer/other documents' semantic hits into a temporal
+        # assessment, and do not consume rewritten query strings for IDs.
+        coordinates = parse_temporal_audit_ids(question)
+        if coordinates:
+            started = time.perf_counter()
+            selected_scope = choose_audit_scope(question, tuple(scopes))
+            if selected_scope is None:
+                return RetrievalResult(
+                    evidence=(), resolved_scopes=tuple(scopes),
+                    warnings=('Historical relation audit requires exactly one engineering project scope.',),
+                    trace=('temporal_relation_audit: BLOCKED_AMBIGUOUS_PROJECT',),
+                )
+            try:
+                item = self._temporal_relation_audit_search(
+                    selected_scope, relation_id=coordinates[0],
+                    new_target_version_id=coordinates[1],
+                )
+            except Exception as exc:
+                LOGGER.warning('Stage 3 temporal audit failed closed', exc_info=True)
+                return RetrievalResult(
+                    evidence=(), resolved_scopes=(selected_scope,),
+                    version_ms=int((time.perf_counter() - started) * 1000),
+                    warnings=(f'Historical relation audit unavailable: {type(exc).__name__}',),
+                    trace=(f'temporal_relation_audit: ERROR {type(exc).__name__}',),
+                )
+            return RetrievalResult(
+                evidence=(item,), resolved_scopes=(selected_scope,),
+                version_ms=int((time.perf_counter() - started) * 1000),
+                trace=('temporal_relation_audit: ' + str(item.metadata['audit_status']),),
+            )
 
         if "semantic_search" in tool_set:
             started = time.perf_counter()
@@ -467,6 +550,26 @@ class EnterpriseRetriever:
                 trace.append(f"semantic_search: ERROR {type(exc).__name__}")
                 LOGGER.warning("Agent semantic retrieval failed", exc_info=True)
             semantic_ms = int((time.perf_counter() - started) * 1000)
+
+        # Sparse is an optional third retriever within the existing semantic
+        # tool, not an LLM-selectable tool or implicit migration. A missing
+        # sidecar simply leaves the original two-source path unchanged.
+        if ("semantic_search" in tool_set and "sql_exact_search" in tool_set
+                and getattr(self, "sparse_enabled", False)):
+            sparse_started = time.perf_counter()
+            try:
+                for q in queries[:2]:
+                    if cancel_check and cancel_check():
+                        break
+                    sparse_items.extend(self._sparse_search(
+                        q, scopes, entity_codes=entity_codes, cancel_check=cancel_check,
+                    ))
+                trace.append(f"stage4_sparse: {len(sparse_items)} SQL-verified candidates")
+            except Exception as exc:
+                warnings.append(f"Stage 4 Sparse unavailable: {type(exc).__name__}")
+                trace.append(f"stage4_sparse: ERROR {type(exc).__name__}")
+                LOGGER.warning("Optional BGE-M3 sparse retrieval failed", exc_info=True)
+            semantic_ms += int((time.perf_counter() - sparse_started) * 1000)
 
         if "sql_exact_search" in tool_set:
             started = time.perf_counter()
@@ -492,6 +595,22 @@ class EnterpriseRetriever:
                 LOGGER.warning("Agent relation retrieval failed", exc_info=True)
             relation_ms = int((time.perf_counter() - started) * 1000)
 
+        # When the question has no exact SPEC number, semantic and SQL hits may
+        # supply bounded *search candidates*, never trusted relation endpoints.
+        # Both endpoints are independently revalidated by the structural tools.
+        discovered_codes = list(entity_codes)
+        if not discovered_codes:
+            for hit in [*semantic_items, *exact_items]:
+                if (hit.scope in scopes and hit.scope != 'QABUG'
+                        and hit.metadata.get('evidence_role') == 'PRIMARY_CONTENT'
+                        and re.fullmatch(r'\d{2,6}', str(hit.specification_code or ''))
+                        and hit.specification_code not in discovered_codes):
+                    discovered_codes.append(hit.specification_code)
+                    if len(discovered_codes) >= 8:
+                        break
+            if discovered_codes:
+                trace.append(f'structural_discovery: {len(discovered_codes)} body-backed search candidate(s)')
+
         if "relation_search" in tool_set:
             # Optional v7 content-level edges; legacy document graph remains
             # authoritative where these evidence-backed units do not exist.
@@ -504,6 +623,34 @@ class EnterpriseRetriever:
             except Exception as exc:
                 warnings.append(f"Content-level graph unavailable: {type(exc).__name__}")
                 LOGGER.warning("Optional v7 content graph retrieval failed", exc_info=True)
+            relation_ms += int((time.perf_counter() - started) * 1000)
+
+        if "relation_search" in tool_set:
+            started = time.perf_counter()
+            try:
+                structural = self._deterministic_section_reference_search(
+                    question, scopes, spec_codes=tuple(discovered_codes),
+                )
+                relation_items.extend(structural)
+                trace.append(f"structural_reference_search: {len(structural)} verified citation(s); not dependency proof")
+            except Exception as exc:
+                warnings.append(f"Structural reference retrieval unavailable: {type(exc).__name__}")
+                trace.append(f"structural_reference_search: ERROR {type(exc).__name__}")
+                LOGGER.warning("Rule-verified structural reference retrieval failed", exc_info=True)
+            relation_ms += int((time.perf_counter() - started) * 1000)
+
+        if "relation_search" in tool_set:
+            started = time.perf_counter()
+            try:
+                layout = self._deterministic_layout_relation_search(
+                    question, scopes, spec_codes=tuple(discovered_codes),
+                )
+                relation_items.extend(layout)
+                trace.append(f'structural_layout_search: {len(layout)} layout fact(s); never a dependency')
+            except Exception as exc:
+                warnings.append(f'Structural layout retrieval unavailable: {type(exc).__name__}')
+                trace.append(f'structural_layout_search: ERROR {type(exc).__name__}')
+                LOGGER.warning('Read-only structural layout search failed', exc_info=True)
             relation_ms += int((time.perf_counter() - started) * 1000)
 
         if "version_search" in tool_set:
@@ -528,6 +675,55 @@ class EnterpriseRetriever:
                 warnings.append(f"Requirement-level version mapping unavailable: {type(exc).__name__}")
                 LOGGER.warning("Optional v7 requirement version mapping failed", exc_info=True)
             version_ms += int((time.perf_counter()-started)*1000)
+
+        if "version_search" in tool_set:
+            started = time.perf_counter()
+            try:
+                changes = self._chapter_version_diff_search(question, scopes)
+                version_items.extend(changes)
+                if changes:
+                    trace.append(f"chapter_version_diff_search: {len(changes)} hash-verified persisted change(s)")
+            except Exception as exc:
+                warnings.append(f"Chapter-level history retrieval unavailable: {type(exc).__name__}")
+                LOGGER.warning("Bounded chapter diff retrieval failed", exc_info=True)
+            version_ms += int((time.perf_counter() - started) * 1000)
+
+        if ('relation_search' in tool_set and 'version_search' in tool_set
+                and not re.search(r'(?:section|sec\.?|§|章节|章節|第\s*)\s*[1-9]\d*(?:\.\d+){0,6}',
+                                  question, flags=re.I)):
+            # Follow a maximum of two VERIFIED references to their exact target
+            # section, without requiring the user to spell that section number.
+            # The persisted diff itself is still checked against real body text.
+            checked_sections: set[tuple[str, str]] = set()
+            for ref in relation_items:
+                if ref.source_type != 'STRUCTURAL_REFERENCE':
+                    continue
+                t = ref.metadata.get('target') or {}
+                code, section = str(t.get('spec_code') or ''), str(t.get('section') or '')
+                if not code or not section or (code, section) in checked_sections:
+                    continue
+                checked_sections.add((code, section))
+                if len(checked_sections) > 2:
+                    break
+                try:
+                    # Explicit numeric code is used as a filter, not as a fact.
+                    # Even if other documents match the question, the joint
+                    # verifier allows only this exact cited target identity.
+                    version_items.extend(self._chapter_version_diff_search(
+                        f'{question} SPEC {code} section {section}', scopes,
+                    ))
+                except Exception as exc:
+                    warnings.append(f'Reference-target historical lookup unavailable: {type(exc).__name__}')
+                    trace.append(f'reference_target_diff: ERROR {type(exc).__name__}')
+                    LOGGER.warning('Bounded reference target diff lookup failed', exc_info=True)
+            if checked_sections:
+                trace.append(f'reference_target_diff: {min(2, len(checked_sections))} cited section(s) checked')
+
+        if 'relation_search' in tool_set and 'version_search' in tool_set:
+            joined = self._joint_reference_change_alerts(relation_items, version_items)
+            relation_items.extend(joined)
+            if joined:
+                trace.append(f'reference_diff_joint: {len(joined)} revalidation alert(s), no impact claim')
 
         if "unresolved_reference_search" in tool_set:
             started = time.perf_counter()
@@ -584,10 +780,80 @@ class EnterpriseRetriever:
                 trace.append(f"issue retrieval: ERROR {type(exc).__name__}")
             sql_ms += int((time.perf_counter() - started) * 1000)
 
-        # Keep a wider candidate pool for governance/reranking upstream.
+        # A bounded second query can be derived from AUTHORITATIVE QA/BUG
+        # observations when a joint query had no SPEC_BODY retrieval hit.
+        # The issue key and model prose are not used to infer spec versions.
+        # Results still flow through the normal SQL/Dense provenance gates.
+        live_skill = build_live_skill_workflow(question)
+        if ("engineering-qa-bug-analysis" in live_skill.skills
+                and "sql_exact_search" in tool_set
+                and not exact_items and not semantic_items
+                and not (cancel_check and cancel_check())):
+            symptom_queries = issue_symptom_queries(issue_items)
+            engineering_scopes = tuple(s for s in scopes if s != "QABUG")
+            for sq in symptom_queries[:2]:
+                if not engineering_scopes or (cancel_check and cancel_check()):
+                    break
+                started = time.perf_counter()
+                try:
+                    found = self._sql_exact_search(sq, engineering_scopes)
+                    # Explicit spec identifiers remain search filters for
+                    # this second pass, not evidence of applicable SW version.
+                    exact_items.extend(
+                        item for item in found
+                        if not entity_codes or item.specification_code in entity_codes
+                    )
+                except Exception as exc:
+                    warnings.append(f"Symptom-backed SQL retrieval unavailable: {type(exc).__name__}")
+                sql_ms += int((time.perf_counter() - started) * 1000)
+                if exact_items:
+                    break
+            if symptom_queries:
+                trace.append(f"issue_symptom_followup: {min(2, len(symptom_queries))} bounded SQL query/queries, "
+                             f"{len(exact_items)} body hit(s); NOT a version/conformance mapping")
+
+        # Independent display-only list for explicitly requested cross-domain
+        # historical BUG + specification comparisons. DO NOT merge into model
+        # evidence: a lexical candidate cannot prove compliance or dependency.
+        if (re.search(r"(?<![A-Z0-9])[A-Z][A-Z0-9]{1,19}-\d{1,10}(?![A-Z0-9])", question, re.I)
+                and re.search(r"式样|式樣|仕様|规格|規格|spec|requirement|符合|满足|滿足|对照|對照|照合", question, re.I)
+                and re.search(r"(?:bug|qa|缺陷|不具合|故障|问题单|問題單|是否|关联|關聯|符合|满足|滿足|对照|對照|照合)", question, re.I)):
+            try:
+                candidate_suggestions = self._bug_spec_candidate_search(question)
+                trace.append(f"bug_spec_candidate_display_only: {len(candidate_suggestions)} unreviewed, non-LLM candidate(s)")
+            except Exception as exc:
+                warnings.append(f"BUG/SPEC candidate index unavailable: {type(exc).__name__}")
+                trace.append(f"bug_spec_candidate_display_only: ERROR {type(exc).__name__}")
+                LOGGER.warning("BUG/SPEC candidate lookup rejected", exc_info=True)
+
+        # Stage 4 phase 1: fuse *body-only* SQL and Dense chunk rankings.
+        # Structured catalog, relationships, history, and QA/BUG retain their
+        # independent evidentiary status; do not RRF them into content chunks.
+        if "sql_exact_search" in tool_set and "semantic_search" in tool_set:
+            hybrid_chunks = fuse_spec_rrf(
+                exact_items, semantic_items, sparse_hits=sparse_items,
+                max_candidates=max(self.top_k * 5, 30),
+            )
+            trace.append(
+                f"stage4_rrf: SQL={len(exact_items)} Dense={len(semantic_items)} "
+                f"Sparse={len(sparse_items)} → {len(hybrid_chunks)} unique body chunk(s); "
+                "ranking only, no reranker"
+            )
+        else:
+            hybrid_chunks = [*exact_items, *semantic_items]
+        if ("sql_exact_search" in tool_set and "semantic_search" in tool_set
+                and hybrid_chunks and os.environ.get("DIC_STAGE4_RERANK_ENABLED", "0") == "1"):
+            from app.ai.stage4_reranker import rerank_spec_chunks
+            hybrid_chunks, rerank_status = rerank_spec_chunks(question, hybrid_chunks)
+            trace.append(f"stage4_reranker: {rerank_status.state}; "
+                         f"candidates={rerank_status.candidates}; elapsed_ms={rerank_status.elapsed_ms}")
+            if rerank_status.state in {"FAILED", "TIMEOUT", "BUSY"}:
+                warnings.append(f"Optional Stage 4 reranker: {rerank_status.state}; original RRF ranks preserved")
+
+        # Keep a wider candidate pool for governance upstream.
         merged: list[EvidenceItem] = []
         seen: set[tuple[Any, ...]] = set()
-        for item in [*catalog_items, *issue_items, *relation_items, *version_items, *unresolved_items, *exact_items, *semantic_items]:
+        for item in [*catalog_items, *issue_items, *relation_items, *version_items, *unresolved_items, *hybrid_chunks]:
             key = (item.scope, item.source_type, item.content_id, item.relation_id, item.specification_code, item.section_id, item.content[:120])
             if key in seen:
                 continue
@@ -604,6 +870,7 @@ class EnterpriseRetriever:
             version_ms=version_ms,
             warnings=tuple(warnings),
             trace=tuple(trace),
+            candidate_suggestions=tuple(candidate_suggestions),
         )
 
     # ------------------------------------------------------------------
@@ -617,7 +884,7 @@ class EnterpriseRetriever:
         scope: str = "AUTO",
         current_scope: str = "",
     ) -> RetrievalResult:
-        scopes = self.resolve_scopes(scope, question, current_scope)
+        scopes = self._factual_spec_scopes(scope, question, current_scope)
         started = time.perf_counter()
         evidence, warnings = self._specification_catalog(question, scopes)
         elapsed = int((time.perf_counter() - started) * 1000)
@@ -644,7 +911,7 @@ class EnterpriseRetriever:
         scope: str = "AUTO",
         current_scope: str = "",
     ) -> RetrievalResult:
-        scopes = self.resolve_scopes(scope, question, current_scope)
+        scopes = self._factual_spec_scopes(scope, question, current_scope)
         started = time.perf_counter()
         evidence, warnings = self._specification_lookup(question, scopes)
         elapsed = int((time.perf_counter() - started) * 1000)
@@ -658,11 +925,387 @@ class EnterpriseRetriever:
             intents=("SPECIFICATION_LOOKUP",),
             tools=("specification_lookup",),
             rewritten_queries=(question,),
-            evidence_strength="STRONG" if evidence else "NONE",
+            evidence_strength=("STRONG" if any(x.source_type == "SPEC_LOOKUP" for x in evidence)
+                               else "LIMITED" if evidence else "NONE"),
             trace=(f"specification_lookup: {len(evidence)} match(es) · {elapsed} ms",),
             route="SPEC_LOOKUP",
             knowledge_source="POSTGRES_STRUCTURED",
         )
+
+    def retrieve_spec_relations(
+        self,
+        question: str,
+        *,
+        scope: str = "AUTO",
+        current_scope: str = "",
+    ) -> RetrievalResult:
+        """Read an exact specification graph neighborhood without an LLM."""
+        scopes = self._factual_spec_scopes(scope, question, current_scope)
+        started = time.perf_counter()
+        codes = self._entity_spec_codes((), question)
+        graph_evidence = self._relation_search(question, scopes, entity_codes=codes)
+        # The reviewed relation registry is not the only factual source. A
+        # specification may contain explicit section references that have not
+        # yet been promoted into the graph. Read those source-exact citations
+        # deterministically and label them as structural references, not as
+        # reviewed functional dependencies.
+        try:
+            structural_evidence = self._deterministic_section_reference_search(
+                question, scopes, spec_codes=codes,
+            )
+        except Exception as exc:
+            # Older/import-only databases may not have the Stage-2 requirement
+            # tables yet. Explicit document-level references in public.contents
+            # are still factual and must remain queryable.
+            LOGGER.info("Requirement-level relation scan unavailable: %s", type(exc).__name__)
+            structural_evidence = []
+        document_references = self._document_reference_search(question, scopes, spec_codes=codes)
+        evidence = [*graph_evidence, *structural_evidence, *document_references]
+        elapsed = int((time.perf_counter() - started) * 1000)
+        return RetrievalResult(
+            evidence=tuple(evidence),
+            resolved_scopes=scopes,
+            sql_ms=elapsed,
+            plan_source="structured-fast-path",
+            plan_summary="Deterministic incoming/outgoing specification relation graph lookup.",
+            intents=("RELATION_LOOKUP",),
+            tools=("relation_search",),
+            rewritten_queries=(question,),
+            evidence_strength=("STRONG" if evidence else "NONE"),
+            trace=(
+                f"relation_graph: {len(graph_evidence)} result(s); "
+                f"structural_references: {len(structural_evidence)} result(s); "
+                f"document_references: {len(document_references)} result(s) · {elapsed} ms",
+            ),
+            route="SPEC_RELATIONS",
+            knowledge_source="POSTGRES_STRUCTURED",
+        )
+
+    def _document_reference_search(
+        self,
+        question: str,
+        scopes: Iterable[str],
+        *,
+        spec_codes: tuple[str, ...] = (),
+    ) -> list[EvidenceItem]:
+        """Extract explicit document-level specification mentions from contents.
+
+        These are source-exact references, not inferred dependencies. This path
+        intentionally works before the optional requirement-unit/graph pipeline
+        has been created.
+        """
+        codes = spec_codes or self._entity_spec_codes((), question)
+        found, _ = self._specification_lookup(question, tuple(scopes))
+        source_marker = re.search(
+            r"Conversation source specification:\s*SPEC[-_: ]*(\d{3,6})", question, re.I,
+        )
+        target_marker = re.search(
+            r"Conversation target specification:\s*SPEC[-_: ]*(\d{3,6})", question, re.I,
+        )
+        explicit_pair = re.search(
+            r"(?<!\d)(\d{3,6})(?!\d).{0,40}(?:引用|参照|參照|参考|參考|依赖|依賴|关联|關聯|关系|關係|有关|有關|对应|對應|和|与|與).{0,40}(?<!\d)(\d{3,6})(?!\d)",
+            question, re.I,
+        )
+        source_codes: tuple[str, ...] = ()
+        requested_targets: tuple[str, ...] = ()
+        if source_marker and target_marker:
+            source_codes = (source_marker.group(1),)
+            requested_targets = (target_marker.group(1),)
+        elif explicit_pair:
+            source_codes = (explicit_pair.group(1),)
+            requested_targets = (explicit_pair.group(2),)
+        if source_codes:
+            found = [item for item in found if str(item.specification_code or "") in source_codes]
+        incoming_requested = (not source_codes) and bool(re.search(
+            r"(?:哪些|什么|什麼|谁|誰).{0,20}(?:引用|参照|參照|参考|參考|依赖|依賴).{0,20}(?:了|到|向)?\s*(?:SPEC[-_: ]*)?\d|"
+            r"(?:被谁|被誰|被哪些|被什么|被什麼|谁在|誰在).{0,12}(?:引用|参照|參照|依赖|依賴)|"
+            r"(?:incoming|inbound|reverse\s+reference)",
+            question,
+            re.I,
+        ))
+        if not codes:
+            # Name-based identity must require all meaningful Latin title words,
+            # not the broad OR semantics used for discovery. This prevents a
+            # title such as “User Profile function Spec” from selecting every
+            # document that happens to contain “User”.
+            cleaned = re.sub(
+                r"(?:引用了?|参照了?|參照了?|参考了?|參考了?|依赖了?|依賴了?|关联|關聯|关系|關係|"
+                r"哪些|什么|什麼|其他|其它|式样书|式樣書|仕様書|规格书|規格書|references?|depends?\s+on|which|what)",
+                " ", question, flags=re.I,
+            )
+            title_tokens = [
+                token.casefold() for token in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", cleaned)
+                if token.casefold() not in {"spec", "specification", "document"}
+            ]
+            if len(title_tokens) >= 2:
+                narrowed = []
+                for item in found:
+                    haystack = f"{item.specification_name} {item.file_name}".casefold()
+                    if all(token in haystack for token in title_tokens):
+                        narrowed.append(item)
+                if narrowed:
+                    found = narrowed
+            codes = tuple(dict.fromkeys(str(item.specification_code) for item in found if item.specification_code))[:8]
+        result: list[EvidenceItem] = []
+        for scope in scopes:
+            documents = [] if incoming_requested else [item for item in found if item.scope == scope and item.document_id]
+            for document in documents[:8]:
+                with self._connect(scope) as conn, conn.cursor() as cur:
+                    cur.execute("SET TRANSACTION READ ONLY")
+                    cur.execute(
+                        "SELECT id, section_id, page_number, content FROM public.contents "
+                        "WHERE document_id=%s ORDER BY id LIMIT 5000",
+                        (document.document_id,),
+                    )
+                    rows = [dict(row) for row in cur.fetchall()]
+                    references: dict[str, dict[str, Any]] = {}
+                    for row in rows:
+                        text = str(row.get("content") or "")
+                        for target in self._extract_document_reference_codes(text):
+                            if target == str(document.specification_code or "").upper() or re.fullmatch(r"(?:19|20)\d{2}", target):
+                                continue
+                            entry = references.setdefault(target, {"sections": set(), "content_ids": set(), "samples": []})
+                            entry["sections"].add(str(row.get("section_id") or "-") )
+                            entry["content_ids"].add(int(row["id"]))
+                            if len(entry["samples"]) < 2:
+                                entry["samples"].append(text[:900])
+                    if not references:
+                        continue
+                    if requested_targets:
+                        references = {
+                            code: value for code, value in references.items()
+                            if code in requested_targets
+                        }
+                        if not references:
+                            continue
+                    target_codes = list(references)
+                    cur.execute(
+                        "SELECT spec_code, canonical_name FROM public.specifications "
+                        "WHERE project_code=%s AND spec_code=ANY(%s::text[])",
+                        (scope, target_codes),
+                    )
+                    names = {
+                        str(row["spec_code"]): str(row.get("canonical_name") or "")
+                        for row in (dict(value) for value in cur.fetchall())
+                    }
+                lines = [
+                    f"Explicit document references in {document.file_name} "
+                    f"(source SPEC {document.specification_code}, version={document.specification_version}):"
+                ]
+                for target in sorted(references, key=lambda x: (not x.isdigit(), int(x) if x.isdigit() else x)):
+                    ref = references[target]
+                    label = names.get(target) or "target name not registered"
+                    status = "REGISTERED" if target in names else "UNRESOLVED_TARGET"
+                    sections = ", ".join(sorted(ref["sections"]))
+                    content_ids = ",".join(str(x) for x in sorted(ref["content_ids"]))
+                    lines.append(
+                        f"- {target} | {label} | {status} | source_sections={sections} | content_ids={content_ids}"
+                    )
+                result.append(EvidenceItem(
+                    evidence_id="", scope=scope, source_type="DOCUMENT_REFERENCE",
+                    content="\n".join(lines), score=1.0,
+                    document_id=document.document_id, file_name=document.file_name,
+                    specification_code=document.specification_code,
+                    specification_name=document.specification_name,
+                    specification_version=document.specification_version,
+                    metadata={
+                        "reference_count": len(references),
+                        "reference_codes": tuple(target_codes),
+                        "requested_target_codes": requested_targets,
+                        "reference_sources": {
+                            code: {
+                                "sections": tuple(sorted(value["sections"])),
+                                "content_ids": tuple(sorted(value["content_ids"])),
+                                "samples": tuple(value["samples"]),
+                            }
+                            for code, value in references.items()
+                        },
+                    },
+                ))
+        if codes and incoming_requested:
+            result.extend(self._incoming_document_reference_search(codes, scopes))
+        if (not incoming_requested and result and re.search(
+                r"(?:哪段|哪一段|哪些内容|哪些內容|具体哪些内容|具體哪些內容|对应内容|對應內容|内容对应|內容對應|内容.{0,8}(?:有关|有關|相关|相關|关联|關聯)|相关片段|相關片段|目标内容|目標內容|content\s+to\s+content)",
+                question, re.I)):
+            sources = [item for item in result if item.source_type == "DOCUMENT_REFERENCE"]
+            target_codes = tuple(dict.fromkeys(
+                code for item in sources for code in tuple((item.metadata or {}).get("reference_codes") or ())
+            ))[:24]
+            query_parts = [
+                sample for item in sources
+                for value in dict((item.metadata or {}).get("reference_sources") or {}).values()
+                for sample in tuple(value.get("samples") or ())
+            ][:8]
+            if target_codes and query_parts:
+                try:
+                    candidates = self._semantic_search(
+                        "\n".join(query_parts), scopes, entity_codes=target_codes,
+                        source_type="REFERENCE_TARGET_CANDIDATE",
+                    )
+                except Exception:
+                    candidates = []
+                for candidate in candidates[:12]:
+                    source_locations = []
+                    for item in sources:
+                        source = dict((item.metadata or {}).get("reference_sources") or {}).get(candidate.specification_code)
+                        if source:
+                            source_locations.append({
+                                "document_id": item.document_id,
+                                "file_name": item.file_name,
+                                "sections": source.get("sections"),
+                                "content_ids": source.get("content_ids"),
+                            })
+                    result.append(replace(
+                        candidate,
+                        source_type="REFERENCE_TARGET_CANDIDATE",
+                        content=(
+                            "[SEMANTIC TARGET CANDIDATE — NOT A CONFIRMED REFERENCE EDGE]\n"
+                            + candidate.content
+                        ),
+                        metadata={
+                            **dict(candidate.metadata or {}),
+                            "relation_semantics": "SEMANTIC_CANDIDATE",
+                            "human_confirmed": False,
+                            "source_reference_locations": tuple(source_locations),
+                        },
+                    ))
+        return result
+
+    @staticmethod
+    def _extract_document_reference_codes(text: str) -> tuple[str, ...]:
+        """Extract only explicit specification-number syntax from source text."""
+        value = str(text or "")
+        candidates: set[str] = set()
+        if re.search(r"Specification\s+name\s*\|\s*Specification\s+No", value, re.I):
+            candidates.update(re.findall(r"(?m)^\s*([A-Z]?\d{3}(?:_[A-Z]{2})?)\s*$", value, re.I))
+            candidates.update(
+                item.replace(" ", "_")
+                for item in re.findall(
+                    r"\|\s*([A-Z]?\d{3}(?:[_ ](?:NA|JP|EU))?)\s*(?:\n|$)", value, re.I,
+                )
+            )
+        candidates.update(re.findall(r"\[([A-Z]?\d{3}(?:_[A-Z]{2})?)\]", value, re.I))
+        candidates.update(re.findall(
+            r"(?:spec(?:ification)?(?:\s+no\.?)?|仕様書)\s*[:#]?\s*\[?([A-Z]?\d{3}(?:_[A-Z]{2})?)\]?",
+            value, re.I,
+        ))
+        candidates.update(re.findall(
+            r"(?<![A-Za-z0-9])([A-Z]?\d{3}(?:_[A-Z]{2})?)_(?=[A-Za-z][^\n]{0,100}\bSpec)",
+            value, re.I,
+        ))
+        return tuple(sorted(
+            (item.upper() for item in candidates if not re.fullmatch(r"(?:19|20)\d{2}", item)),
+            key=lambda item: (not item.isdigit(), int(item) if item.isdigit() else item),
+        ))
+
+    def _incoming_document_reference_search(
+        self, target_codes: tuple[str, ...], scopes: Iterable[str],
+    ) -> list[EvidenceItem]:
+        """Find current SPEC_BODY documents that explicitly cite target codes."""
+        primary = PrimarySpecificationDocumentPolicy.sql_primary_predicate("d")
+        preferred = PrimarySpecificationDocumentPolicy.sql_preferred_body_version_id("sp")
+        result: list[EvidenceItem] = []
+        for scope in scopes:
+            matches: dict[str, dict[str, Any]] = {}
+            with self._connect(scope) as conn, conn.cursor() as cur:
+                cur.execute("SET TRANSACTION READ ONLY")
+                patterns = [f"%{code}%" for code in target_codes]
+                cur.execute(f"""
+                    SELECT sp.spec_code, sp.canonical_name, sv.version_label, sv.document_id,
+                           d.file_name, c.id AS content_id, c.section_id, c.content
+                    FROM public.specifications sp
+                    JOIN public.specification_versions sv ON sv.id={preferred}
+                    JOIN public.documents d ON d.document_id=sv.document_id
+                    JOIN public.contents c ON c.document_id=sv.document_id
+                    WHERE sp.project_code=%s AND sp.spec_code<>ALL(%s::text[])
+                      AND sv.branch_name='MAIN' AND {primary}
+                      AND c.content ILIKE ANY(%s::text[])
+                    ORDER BY c.id LIMIT 5000
+                """, (scope, list(target_codes), patterns))
+                for raw in cur.fetchall():
+                    row = dict(raw)
+                    cited = set(self._extract_document_reference_codes(str(row.get("content") or "")))
+                    overlap = cited.intersection(target_codes)
+                    if not overlap:
+                        continue
+                    source = str(row.get("spec_code") or "")
+                    entry = matches.setdefault(source, {
+                        "name": str(row.get("canonical_name") or ""),
+                        "version": str(row.get("version_label") or ""),
+                        "document_id": str(row.get("document_id") or ""),
+                        "file_name": str(row.get("file_name") or ""),
+                        "targets": set(), "sections": set(), "content_ids": set(),
+                    })
+                    entry["targets"].update(overlap)
+                    entry["sections"].add(str(row.get("section_id") or "-"))
+                    entry["content_ids"].add(int(row["content_id"]))
+            if matches:
+                lines = [f"Current SPEC_BODY documents explicitly referencing {', '.join(target_codes)} (scope={scope}):"]
+                for source, entry in sorted(matches.items()):
+                    lines.append(
+                        f"- source={source} {entry['name']} | targets={','.join(sorted(entry['targets']))} | "
+                        f"version={entry['version']} | sections={','.join(sorted(entry['sections']))} | "
+                        f"content_ids={','.join(str(x) for x in sorted(entry['content_ids']))}"
+                    )
+                result.append(EvidenceItem(
+                    evidence_id="", scope=scope, source_type="INCOMING_DOCUMENT_REFERENCE",
+                    content="\n".join(lines), score=1.0,
+                    specification_code=target_codes[0],
+                    metadata={"direction": "INCOMING", "source_count": len(matches), "target_codes": target_codes},
+                ))
+        return result
+
+    @classmethod
+    def _factual_spec_scopes(cls, scope: str, question: str, current_scope: str = "") -> tuple[str, ...]:
+        """Do not append COMMON to a specifically named project fact query."""
+        chosen = cls.resolve_scopes(scope, question, current_scope)
+        upper = str(question).upper()
+        requested = str(scope or 'AUTO').upper()
+        if requested == 'AUTO' and ('21MM' in upper) != ('24MM' in upper):
+            target = '21MM' if '21MM' in upper else '24MM'
+            return (target,)
+        return chosen
+
+    def retrieve_spec_outline(self, question: str, *, scope: str = 'AUTO', current_scope: str = '') -> RetrievalResult:
+        from app.ai.spec_facts import lookup_outline
+        scopes = self._factual_spec_scopes(scope, question, current_scope)
+        started = time.perf_counter()
+        rows, warnings = lookup_outline(self, question, scopes)
+        elapsed = int((time.perf_counter() - started) * 1000)
+        return RetrievalResult(evidence=tuple(rows), resolved_scopes=scopes,
+            sql_ms=elapsed, warnings=tuple(warnings), plan_source='structured-fast-path',
+            plan_summary='PostgreSQL SPEC_BODY chapter and section directory (no LLM).',
+            intents=('SPECIFICATION_OUTLINE',), tools=('specification_lookup',),
+            route='SPEC_OUTLINE', knowledge_source='POSTGRES_STRUCTURED',
+            evidence_strength=('STRONG' if any(x.source_type == 'SPEC_OUTLINE' for x in rows)
+                               else 'LIMITED' if rows else 'NONE'))
+
+    def retrieve_spec_chapter_content(self, question: str, *, scope: str = 'AUTO', current_scope: str = '') -> RetrievalResult:
+        from app.ai.spec_facts import lookup_chapter_content
+        scopes = self._factual_spec_scopes(scope, question, current_scope)
+        started = time.perf_counter()
+        rows, warnings = lookup_chapter_content(self, question, scopes)
+        elapsed = int((time.perf_counter() - started) * 1000)
+        return RetrievalResult(evidence=tuple(rows), resolved_scopes=scopes,
+            sql_ms=elapsed, warnings=tuple(warnings), plan_source='structured-fast-path',
+            plan_summary='Bounded PostgreSQL chapter content excerpts (no LLM).',
+            intents=('SPEC_CHAPTER_CONTENT',), tools=('specification_lookup',),
+            route='SPEC_CHAPTER_CONTENT', knowledge_source='POSTGRES_STRUCTURED',
+            evidence_strength=('LIMITED' if rows else 'NONE'))
+
+    def retrieve_spec_version_facts(self, question: str, *, scope: str = 'AUTO', current_scope: str = '') -> RetrievalResult:
+        from app.ai.spec_facts import lookup_adjacent_versions
+        scopes = self._factual_spec_scopes(scope, question, current_scope)
+        started = time.perf_counter()
+        rows, warnings = lookup_adjacent_versions(self, question, scopes)
+        elapsed = int((time.perf_counter() - started) * 1000)
+        return RetrievalResult(evidence=tuple(rows), resolved_scopes=scopes,
+            sql_ms=elapsed, warnings=tuple(warnings), plan_source='structured-fast-path',
+            plan_summary='Adjacent MAIN SPEC_BODY version/diff inventory (no LLM).',
+            intents=('BODY_VERSION_FACTS',), tools=('version_search',),
+            route='SPEC_VERSION_FACTS', knowledge_source='POSTGRES_STRUCTURED',
+            evidence_strength=('STRONG' if any(x.metadata.get('identity_verified', True) for x in rows)
+                               else 'LIMITED' if rows else 'NONE'))
 
     @staticmethod
     def _issue_query_mode(question: str, filters: dict[str, str] | None = None) -> str:
@@ -1111,15 +1754,33 @@ class EnterpriseRetriever:
             try:
                 with self._connect(scope) as conn, conn.cursor() as cur:
                     cur.execute(
-                        """
-                        SELECT specification_id, specification_key, project_code,
-                               region_scope, spec_code, spec_type, spec_subtype,
-                               canonical_name, specification_status,
-                               current_version, current_version_status,
-                               current_document_id, version_count, history_count
-                        FROM public.specification_catalog
-                        WHERE project_code = %s
-                        ORDER BY spec_code NULLS LAST, canonical_name
+                        f"""
+                        SELECT sp.id AS specification_id, sp.specification_key, sp.project_code,
+                               sp.region_scope, sp.spec_code, sp.spec_type, sp.spec_subtype,
+                               sp.canonical_name, sp.status AS specification_status,
+                               pv.version_label AS current_version, pv.status AS current_version_status,
+                               pv.document_id AS current_document_id, pv.file_name AS current_file_name,
+                               COALESCE(vc.version_count, 0) AS version_count,
+                               GREATEST(COALESCE(vc.version_count, 0) - 1, 0) AS history_count
+                        FROM public.specifications sp
+                        LEFT JOIN LATERAL (
+                            SELECT sv.*, d.file_name FROM public.specification_versions sv
+                            JOIN public.documents d ON d.document_id=sv.document_id
+                            WHERE sv.specification_id=sp.id AND sv.branch_name='MAIN'
+                              AND {PrimarySpecificationDocumentPolicy.sql_primary_predicate("d")}
+                            ORDER BY CASE WHEN sv.id=sp.current_version_id THEN 0 ELSE 1 END,
+                                     sv.version_sort_key DESC NULLS LAST, sv.version_seq DESC, sv.id DESC
+                            LIMIT 1
+                        ) pv ON TRUE
+                        LEFT JOIN LATERAL (
+                            SELECT COUNT(*)::INTEGER AS version_count
+                            FROM public.specification_versions cv
+                            JOIN public.documents dv ON dv.document_id=cv.document_id
+                            WHERE cv.specification_id=sp.id AND cv.branch_name='MAIN'
+                              AND {PrimarySpecificationDocumentPolicy.sql_primary_predicate("dv")}
+                        ) vc ON TRUE
+                        WHERE sp.project_code = %s
+                        ORDER BY sp.spec_code NULLS LAST, sp.canonical_name
                         """,
                         (scope,),
                     )
@@ -1135,9 +1796,15 @@ class EnterpriseRetriever:
                 for row in rows[:max_rows]:
                     code = str(row.get("spec_code") or "-")
                     name = str(row.get("canonical_name") or "-")
-                    version = str(row.get("current_version") or "-")
-                    status = str(row.get("current_version_status") or row.get("specification_status") or "-")
-                    lines.append(f"- {code} | {name} | current={version} | status={status}")
+                    file_name=str(row.get("current_file_name") or "")
+                    markers=tuple(dict.fromkeys(x.upper() for x in re.findall(
+                        r"(?<![A-Z0-9])(21MM|24MM)(?![A-Z0-9])",file_name,re.I)))
+                    conflict=bool(markers and scope.upper() not in markers)
+                    version = "-" if conflict else str(row.get("current_version") or "-")
+                    status = ("PROJECT_SCOPE_CONFLICT" if conflict else
+                              str(row.get("current_version_status") or "-") if row.get("current_version")
+                              else "NO_REGISTERED_SPEC_BODY")
+                    lines.append(f"- {code} | {name} | body_version={version} | status={status}")
                 if len(rows) > max_rows:
                     lines.append(f"- … 其余 {len(rows) - max_rows} 本未展开；总数仍为 {len(rows)}。")
                 content = "\n".join(lines)
@@ -1165,9 +1832,12 @@ class EnterpriseRetriever:
         and uses supporting files only as metadata/audit records.
         """
         codes = self._entity_spec_codes((), question)
-        if not codes:
-            codes = tuple(dict.fromkeys(re.findall(r"(?<!\d)(\d{3,6})(?!\d)", question)))[:8]
-        tokens = self._tokens(question)
+        # Never turn a year, BUG number or SW version into a specification ID.
+        # Bluetooth/BT is a QUERY ALIAS, not a hard-coded 550 identity.
+        from app.ai.spec_facts import extra_spec_codes, lookup_keywords, requested_version
+        codes = tuple(dict.fromkeys((*codes, *extra_spec_codes(question))))[:8]
+        keywords = lookup_keywords(question)
+        requested = requested_version(question)
         result: list[EvidenceItem] = []
         warnings: list[str] = []
         primary_cd = PrimarySpecificationDocumentPolicy.sql_primary_predicate("cd")
@@ -1176,17 +1846,18 @@ class EnterpriseRetriever:
             clauses: list[str] = []
             params: list[Any] = []
             if codes:
-                clauses.append("sp.spec_code = ANY(%s)")
+                clauses.append("sp.spec_code = ANY(%s::text[])")
                 params.append(list(codes))
             if not codes:
-                for token in tokens[:4]:
+                for keyword in keywords[:3]:
                     clauses.append(
-                        "(sp.canonical_name ILIKE %s OR COALESCE(pd.metadata ->> 'specification_name','') ILIKE %s OR COALESCE(pd.title,'') ILIKE %s)"
+                        "(sp.canonical_name ILIKE %s OR COALESCE(pd.metadata ->> 'specification_name','') ILIKE %s "
+                        "OR COALESCE(pd.title,'') ILIKE %s OR pd.file_name ILIKE %s)"
                     )
-                    value = f"%{token}%"
-                    params.extend([value, value, value])
+                    value = f"%{keyword}%"
+                    params.extend([value, value, value, value])
             where = " OR ".join(clauses) if clauses else "FALSE"
-            order_sql = "CASE WHEN sp.spec_code = ANY(%s) THEN 0 ELSE 1 END," if codes else ""
+            order_sql = "CASE WHEN sp.spec_code = ANY(%s::text[]) THEN 0 ELSE 1 END," if codes else ""
             order_params: list[Any] = [list(codes)] if codes else []
             try:
                 with self._connect(scope) as conn, conn.cursor() as cur:
@@ -1201,6 +1872,7 @@ class EnterpriseRetriever:
                                 sp.canonical_name
                             ) AS canonical_name,
                             sp.status AS specification_status,
+                            pv.id AS current_version_id,
                             pv.version_label AS current_version,
                             pv.status AS current_version_status,
                             pv.document_id AS current_document_id,
@@ -1216,6 +1888,8 @@ class EnterpriseRetriever:
                             WHERE sv.specification_id = sp.id
                               AND sv.branch_name = 'MAIN'
                               AND {PrimarySpecificationDocumentPolicy.sql_primary_predicate('pd0')}
+                              AND (%s::text IS NULL OR
+                                   lower(regexp_replace(sv.version_label, '^(ver(sion)?|v)[. ]*', '', 'i')) = %s::text)
                             ORDER BY
                                 CASE WHEN sv.id = sp.current_version_id THEN 0 ELSE 1 END,
                                 sv.version_sort_key DESC NULLS LAST, sv.version_seq DESC, sv.id DESC
@@ -1236,19 +1910,89 @@ class EnterpriseRetriever:
                         ORDER BY {order_sql} sp.spec_code NULLS LAST, canonical_name
                         LIMIT 20
                         """,
-                        tuple([scope, *params, *order_params]),
+                        tuple([requested, requested, scope, *params, *order_params]),
                     )
                     rows = [dict(row) for row in cur.fetchall()]
             except Exception as exc:
+                # A broken version query must not erase independently verifiable
+                # imported-file evidence; retain a warning and probe documents.
                 warnings.append(f"{scope} specification lookup unavailable: {type(exc).__name__}")
-                continue
+                rows = []
 
+            if not rows and keywords:
+                # Distinguish an imported SPEC_BODY file without trusted version
+                # linkage from a genuinely registered specification version.
+                # Never claim a name/code/approval by inference from a filename.
+                try:
+                    with self._connect(scope) as conn, conn.cursor() as cur:
+                        values = [f"%{v}%" for v in (keywords[:1] if codes else keywords[:2])]
+                        # 550+Bluetooth should search the specific Bluetooth Audio
+                        # title first, not the entire Bluetooth/BUG document corpus.
+                        expressions = " OR ".join("d.file_name ILIKE %s" for _ in values)
+                        # This read-only fallback resolves the *physical* body document.
+                        # A document with an approved MAIN version may still belong to
+                        # an unnumbered/other specification identity.  Never promote it
+                        # to the user's requested numeric spec without catalog approval.
+                        cur.execute(
+                            f"""SELECT d.document_id, d.file_name, d.version, d.metadata,
+                                       sv.id AS linked_version_id, sv.version_label AS linked_version,
+                                       sv.branch_name AS linked_branch,
+                                       sp.id AS linked_specification_id,
+                                       sp.spec_code AS linked_spec_code,
+                                       sp.region_scope AS linked_region
+                                FROM public.documents d
+                                LEFT JOIN public.specification_versions sv
+                                  ON sv.document_id=d.document_id AND sv.branch_name='MAIN'
+                                LEFT JOIN public.specifications sp
+                                  ON sp.id=sv.specification_id AND sp.project_code=%s
+                                WHERE d.project_code=%s
+                                  AND {PrimarySpecificationDocumentPolicy.sql_primary_predicate('d')}
+                                  AND ({expressions})
+                                ORDER BY d.updated_at DESC, sv.id DESC NULLS LAST LIMIT 60""",
+                            (scope, scope, *values),
+                        )
+                        candidates = [dict(row) for row in cur.fetchall()]
+                    seen = set()
+                    for d in candidates:
+                        inferred = requested_version(str(d.get('file_name') or ''))
+                        declared = str(d.get('version') or '').removeprefix('v').removeprefix('V').strip()
+                        if requested and requested not in {inferred, declared.casefold()}:
+                            continue
+                        doc_id = str(d['document_id'])
+                        if doc_id in seen:
+                            continue
+                        seen.add(doc_id)
+                        linked = bool(d.get('linked_version_id') and d.get('linked_specification_id'))
+                        candidate_kind = 'SPEC_IDENTITY_CANDIDATE' if linked else 'SPEC_UNBOUND_FILE'
+                        result.append(EvidenceItem(
+                            evidence_id='', scope=scope, source_type=candidate_kind,
+                            content=('Registered MAIN SPEC_BODY with UNVERIFIED numeric identity'
+                                     if linked else 'Imported SPEC_BODY without specification-version linkage'),
+                            file_name=str(d['file_name']), document_id=doc_id,
+                            specification_version=(str(d.get('linked_version') or '') if linked else declared),
+                            metadata={'file_version': declared, 'document_role': 'PRIMARY',
+                                      'linkage_verified': False,
+                                      'linked_version_id': d.get('linked_version_id'),
+                                      'linked_specification_id': d.get('linked_specification_id'),
+                                      'linked_spec_code': d.get('linked_spec_code'),
+                                      'linked_region': d.get('linked_region'),
+                                      'linked_branch': d.get('linked_branch'),
+                                      'requested_spec_codes': tuple(codes)},
+                        ))
+                except Exception as exc:
+                    warnings.append(f"{scope} imported body lookup unavailable: {type(exc).__name__}")
             for row in rows:
                 code = str(row.get("spec_code") or "")
                 name = str(row.get("canonical_name") or "")
                 version = str(row.get("current_version") or "")
                 file_name = str(row.get("current_file_name") or "")
                 document_metadata = dict(row.get("current_document_metadata") or {})
+                explicit_projects = tuple(dict.fromkeys(
+                    value.upper() for value in re.findall(
+                        r"(?<![A-Z0-9])(21MM|24MM)(?![A-Z0-9])", file_name, re.I
+                    )
+                ))
+                project_conflict = bool(explicit_projects and scope.upper() not in explicit_projects)
                 is_primary = PrimarySpecificationDocumentPolicy.is_primary(
                     file_name=file_name, metadata=document_metadata
                 )
@@ -1262,6 +2006,9 @@ class EnterpriseRetriever:
                 row["document_priority"] = PrimarySpecificationDocumentPolicy.role_rank(
                     file_name=file_name, metadata=document_metadata
                 )
+                row["filename_project_markers"] = explicit_projects
+                row["identity_verified"] = not project_conflict
+                row["project_identity_conflict"] = project_conflict
                 content = (
                     f"Specification {code or '-'}: {name or '-'}. "
                     f"Authoritative document={file_name or row.get('current_document_id') or '-'}; "
@@ -1271,8 +2018,9 @@ class EnterpriseRetriever:
                 )
                 result.append(
                     EvidenceItem(
-                        evidence_id="", scope=scope, source_type="SPEC_LOOKUP",
-                        content=content, score=1.0 if is_primary else 0.2,
+                        evidence_id="", scope=scope,
+                        source_type=("SPEC_SCOPE_CONFLICT" if project_conflict else "SPEC_LOOKUP"),
+                        content=content, score=(0.0 if project_conflict else 1.0 if is_primary else 0.2),
                         document_id=str(row.get("current_document_id") or ""),
                         file_name=file_name, specification_code=code,
                         specification_name=name, specification_version=version,
@@ -1610,7 +2358,8 @@ class EnterpriseRetriever:
                            r.created_at_source, r.updated_at_source, r.resolved_at_source,
                            r.source_sheet, r.source_row_number, r.quality_flags,
                            q.precondition, q.procedure_expected, q.actual_behavior, q.answer, q.answer_type,
-                           q.final_answer, q.final_answerer, q.rationale, q.reference_spec,
+                           q.final_answer, q.final_answerer, q.rationale,
+                           COALESCE(q.reference_spec,r.normalized_fields->>'reference_spec') AS reference_spec,
                            q.sheet_name AS qa_sheet_name, q.test_spec_name, q.item_cell,
                            b.phenomenon, b.repro_steps, b.expected_result, b.actual_result,
                            b.analysis_result, b.analysis_comment, b.analysis_owner, b.root_cause,
@@ -1955,6 +2704,79 @@ class EnterpriseRetriever:
         right = re.sub(r"^(?:ver(?:sion)?\.?\s*)", "", str(requested or "").strip(), flags=re.I).casefold()
         return bool(left and right and left == right)
 
+    def _temporal_relation_audit_search(
+        self, scope: str, *, relation_id: int, new_target_version_id: int,
+    ) -> EvidenceItem:
+        """Single snapshot, read-only and fail-closed Stage 3 evidence audit.
+
+        The report measures versioned text mapping, not engineering validity.
+        Incomplete audits have a distinct weak evidence class.
+        """
+        from app.engineering_intelligence.relation_temporal_audit import assess_temporal_relation
+
+        profile = self.postgres_profiles.get(scope)
+        if (scope not in {'21MM', '24MM', 'COMMON'} or profile is None
+                or profile.database.lower() in {'rag', 'rag_qabug'}
+                or profile.user.lower() in {'postgres', 'root'}):
+            raise ValueError('Configured restricted engineering database required')
+        with self._connect(scope) as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+                    cur.execute("SET LOCAL lock_timeout='5s'")
+                    cur.execute("SET LOCAL statement_timeout='30s'")
+                    cur.execute('SELECT current_database() AS db, project_code FROM public.project_info')
+                    identity = cur.fetchall()
+                    if (len(identity) != 1 or str(identity[0]['db']) != profile.database
+                            or identity[0]['project_code'] != scope):
+                        raise RuntimeError('Project database identity mismatch')
+                    result = assess_temporal_relation(
+                        cur, project=scope, relation_id=relation_id,
+                        new_target_version_id=new_target_version_id,
+                    )
+            finally:
+                conn.rollback()
+        status = str(result['status'])
+        issues = tuple(str(v)[:100] for v in result.get('issues', ())[:5])
+        verified = status != 'INSUFFICIENT_EVIDENCE'
+        content = (
+            f'Stage 3 historical relation audit (read-only; NOT engineering approval): '
+            f'project={scope}, relation_id={relation_id}, '
+            f'new_target_version_id={new_target_version_id}\n'
+            f'Historical target text mapping status: {status}. '
+            f'Engineering relation validity: UNDETERMINED; human revalidation REQUIRED.\n'
+            f'Old target: SPEC {result.get("target_spec_code", "UNVERIFIED")}, '
+            f'version {result.get("old_target_version", "UNVERIFIED")}, '
+            f'section {result.get("old_target_section", "UNVERIFIED")}; '
+            f'new target version {result.get("new_target_version", "UNVERIFIED")}.\n'
+            f'Old target SHA256={result.get("old_target_hash", "UNVERIFIED")}; '
+            f'new target SHA256={result.get("new_target_hash", "UNVERIFIED")}.\n'
+            f'Source version effectiveness alignment: '
+            f'{result.get("source_version_alignment", "NOT_ESTABLISHED")}; '
+            f'full content digest scan: {result.get("full_source_digest_check", "NOT_PERFORMED")}.\n'
+            + (f'Rejection reasons: {", ".join(issues)}.\n' if issues else '')
+            + 'Text continuity alone NEVER proves relation continuity, compliance, impact or invalidation.'
+        )
+        return EvidenceItem(
+            evidence_id='', scope=scope,
+            source_type='TEMPORAL_RELATION_AUDIT' if verified else 'TEMPORAL_RELATION_UNVERIFIED',
+            content=content, relation_id=relation_id,
+            specification_code=str(result.get('target_spec_code') or ''),
+            specification_version=str(result.get('new_target_version') or ''),
+            section_id=str(result.get('old_target_section') or ''),
+            metadata={
+                'evidence_role': 'TEMPORAL_MAPPING_STATUS_ONLY',
+                'audit_status': status,
+                'relation_validity': 'UNDETERMINED',
+                'human_revalidation_required': True,
+                'authority': 'READ_ONLY_EVIDENCE_AUDIT_NOT_APPROVAL',
+                'relation_id': relation_id,
+                'new_target_version_id': new_target_version_id,
+                'issues': issues,
+                'full_source_digest_check': result.get('full_source_digest_check', 'NOT_PERFORMED'),
+            },
+        )
+
     def _version_search(self, question: str, scopes: Iterable[str]) -> list[EvidenceItem]:
         # Compatibility note: public.specification_version_history,
         # public.specification_change_summary and public.specification_change_detail remain
@@ -2247,22 +3069,25 @@ class EnterpriseRetriever:
                 codes.append(match.group(1))
         patterns = (
             r"(?:SPEC[-_: ]+)(\d{3,6})",
-            r"\b(\d{3,6})\b(?=\s*(?:式样书|式樣書|规格|規格|specification\b|spec\b))",
+            r"(?<![A-Za-z0-9])(\d{3,6})(?!\d)(?=\s*(?:式样书|式樣書|仕様書|规格书?|規格書?|specification\b|spec\b))",
+            r"(?:21MM|24MM|COMMON)\s*(?:(?:项目|項目|工程)\s*)?(?:中|里|裡|内|內|的|中的|里的|裡的|内的|內的)?\s*(?:编号|編號|No\.?|SPEC[-_: ]*)?\s*(\d{3,6})(?!\d)",
+            r"(?:式样书?|式樣書?|仕様書|规格书?|規格書?|specification|spec)\s*(?:编号|編號|No\.?|#)?\s*(\d{3,6})(?!\d)",
             r"(?:^|[\s,，:：])(\d{3,6})(?=\s*(?:的|是什么|是什麼|の|について|相关|關聯|关联|参照|參照|参考|引用|式样|式樣|仕様|spec))",
+            r"^(?:(?:请|請)?(?:(?:给我|給我|帮我|幫我)\s*|(?:给我|給我|帮我|幫我)?\s*(?:找|查|搜|看|打开|打開)(?:一下|下|找|询|詢)?\s*))?(\d{3,6})(?:\s*(?:这本|這本|式样书?|式樣書?|仕様書|规格书?|規格書?|spec))?[?？。.!！\s]*$",
         )
         question_text = str(question or "")
         for pattern in patterns:
             for match in re.finditer(pattern, question_text, flags=re.I):
                 code = match.group(1)
-                if code not in codes:
+                if not re.fullmatch(r"(?:19|20)\d{2}", code) and code not in codes:
                     codes.append(code)
         # In an explicit relation/version question, a bare 2-6 digit token is
         # overwhelmingly likely to be a Specification No.  Avoid decimal
         # components so version labels such as 2.10 do not become spec code 10.
-        if re.search(r"引用|依赖|关系|reference|depend|upstream|downstream|关联|關聯|版本|revision|rev|diff|变化|变更|历史|修改", question_text, flags=re.I):
-            for match in re.finditer(r"(?<![\d.])(\d{2,6})(?![\d.])", question_text):
+        if re.search(r"引用|参照|參照|参考|參考|依赖|依賴|关系|關係|reference|depend|upstream|downstream|关联|關聯|版本|revision|rev|diff|变化|变更|历史|修改", question_text, flags=re.I):
+            for match in re.finditer(r"(?<![A-Za-z0-9_.-])(\d{2,6})(?![\d.])", question_text):
                 code = match.group(1)
-                if code not in codes:
+                if not re.fullmatch(r"(?:19|20)\d{2}", code) and code not in codes:
                     codes.append(code)
         return tuple(codes[:8])
 
@@ -2340,6 +3165,105 @@ class EnterpriseRetriever:
                     conditions.append(FieldCondition(key=payload_key, match=MatchValue(value=value)))
         return Filter(must=conditions, must_not=must_not) if (conditions or must_not) else None
 
+    def _sparse_search(
+        self, question: str, scopes: Iterable[str], *, entity_codes: tuple[str, ...] = (),
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> list[EvidenceItem]:
+        """Sparse-only Qdrant sidecar + mandatory PostgreSQL body hydration.
+
+        Unlike Dense, a sparse hit is NEVER allowed to supply original content
+        from its Qdrant payload. Failed hash/identity checks drop the hit.
+        """
+        from app.ai.stage4_sparse import (
+            BGEM3SparseEncoder, MODEL_NAME, SPARSE_NAME, sparse_collection,
+        )
+        from qdrant_client.models import SparseVector
+
+        if cancel_check and cancel_check():
+            return []
+        client = self._get_qdrant_client()
+        available = []
+        for scope in scopes:
+            if scope == "QABUG" or scope not in self.collections:
+                continue
+            name = sparse_collection(self.collections[scope])
+            if self._collection_exists(client, name):
+                available.append((scope, name))
+        if not available:
+            return []  # no sidecar: do not load a second CPU model
+        if self._sparse_encoder is None:
+            self._sparse_encoder = BGEM3SparseEncoder()
+        [encoded] = self._sparse_encoder.encode([question])
+        results: list[EvidenceItem] = []
+        for scope, name in available:
+            if cancel_check and cancel_check():
+                break
+            result = client.query_points(
+                collection_name=name, query=SparseVector(
+                    indices=encoded.indices, values=encoded.values,
+                ), using=SPARSE_NAME,
+                query_filter=self._semantic_filter(scope, entity_codes),
+                limit=max(self.top_k * 4, 32), with_payload=True, with_vectors=False,
+            )
+            hits = list(getattr(result, "points", []) or [])
+            by_id: dict[int, tuple[Any, dict[str, Any]]] = {}
+            for hit in hits:
+                payload = dict(getattr(hit, "payload", {}) or {})
+                try:
+                    cid = int(payload.get("content_id"))
+                except (TypeError, ValueError):
+                    continue
+                if (cid < 0 or cid in by_id or str(getattr(hit, "id", "")) != str(cid)
+                        or payload.get("project_code") != scope
+                        or payload.get("index_scope") != "CURRENT"
+                        or payload.get("sparse_model") != MODEL_NAME
+                        or payload.get("sparse_vector_name") != SPARSE_NAME
+                        or not payload.get("content_hash")
+                        or not PrimarySpecificationDocumentPolicy.is_primary(
+                            file_name=str(payload.get("file_name") or ""), metadata=payload,
+                        )):
+                    continue
+                by_id[cid] = (hit, payload)
+            if not by_id:
+                continue
+            # SQL is the only source of sparse body text and identity. The
+            # metadata-only sidecar is not a second source of engineering truth.
+            authoritative = {int(r["content_id"]): r for r in self._fetch_chunks(scope, list(by_id))}
+            for cid, (hit, payload) in by_id.items():
+                row = authoritative.get(cid)
+                if not row:
+                    continue
+                if any(str(row.get(row_key) or "") != str(payload.get(payload_key) or "")
+                       for row_key, payload_key in (
+                           ("document_id", "document_id"), ("file_name", "file_name"),
+                           ("specification_version", "version"),
+                           ("specification_code", "spec_code"),
+                           ("content_hash", "content_hash"),
+                       )):
+                    continue
+                if not PrimarySpecificationDocumentPolicy.is_primary(
+                    file_name=str(row.get("file_name") or ""), metadata=row,
+                ):
+                    continue
+                if hashlib.sha256(str(row.get("content") or "").encode("utf-8")).hexdigest() != str(row.get("content_hash") or "").lower():
+                    continue
+                if str(row.get("project_code") or "") != scope:
+                    continue
+                try:
+                    sparse_score = float(getattr(hit, "score", None))
+                except (TypeError, ValueError):
+                    continue
+                if not math.isfinite(sparse_score) or sparse_score < 0:
+                    continue
+                md = {**payload, "knowledge_origin": "QDRANT_SPARSE",
+                      "hydration": "POSTGRES_HASH_AND_IDENTITY_VERIFIED",
+                      "evidence_role": "PRIMARY_CONTENT", "ranking_only": True}
+                results.append(self._chunk_to_evidence(
+                    scope, row, "QDRANT_SPARSE", sparse_score, md,
+                ))
+        results.sort(key=lambda item: -(item.score or 0.0))
+        return results[:max(self.top_k * 4, 32)]
+
     def _semantic_search(
         self,
         question: str,
@@ -2353,10 +3277,14 @@ class EnterpriseRetriever:
         field_filters: dict[str, str] | None = None,
         metrics: dict[str, int] | None = None,
         stage_callback: Callable[[str, str, int], None] | None = None,
+        observation_only: bool = False,
     ) -> list[EvidenceItem]:
         if cancel_check and cancel_check():
             return []
         metrics = metrics if metrics is not None else {}
+
+        from app.ai.retrieval_deadline import remaining_ms
+        remaining_ms()
 
         cold_start = not self.embedding_loaded
         if stage_callback:
@@ -2395,10 +3323,16 @@ class EnterpriseRetriever:
                 scope, entity_codes, artifact_type=artifact_type, issue_key=issue_key,
                 field_filters=field_filters,
             )
+            if scope=="QABUG" and observation_only:
+                from qdrant_client.models import Filter,FieldCondition,MatchAny
+                observation=FieldCondition(key="section_type",match=MatchAny(any=sorted(ISSUE_OBSERVATION_SECTIONS)))
+                query_filter=Filter(must=[query_filter,observation] if query_filter is not None else [observation])
             # Supporting files can rank above a body in legacy collections.
             # Over-fetch before v1.01 filename/metadata arbitration so rejecting
             # a Cover Sheet does not accidentally discard the body at rank K+1.
             candidate_limit = self.top_k if scope == "QABUG" else max(self.top_k * 4, 32)
+            remaining=remaining_ms()
+            budget_options={"timeout":max(1,min(10,(remaining+999)//1000))} if remaining is not None else {}
             try:
                 response = client.query_points(
                     collection_name=collection,
@@ -2407,6 +3341,7 @@ class EnterpriseRetriever:
                     limit=candidate_limit,
                     with_payload=True,
                     with_vectors=False,
+                    **budget_options,
                 )
                 hits = list(getattr(response, "points", []) or [])
             except (AttributeError, TypeError):
@@ -2418,6 +3353,7 @@ class EnterpriseRetriever:
                         limit=candidate_limit,
                         with_payload=True,
                         with_vectors=False,
+                        **budget_options,
                     )
                 )
             hits_by_scope[scope] = [
@@ -2435,99 +3371,111 @@ class EnterpriseRetriever:
         items: list[EvidenceItem] = []
         hydration_started = time.perf_counter()
         hydrated_rows = 0
-        payload_rows = 0
+        rejected_rows = 0
         for scope, hits in hits_by_scope.items():
-            ids: list[int] = []
-            score_by_id: dict[int, float] = {}
-            payload_by_id: dict[int, dict[str, Any]] = {}
-            direct_payload_ids: set[int] = set()
+            # Qdrant supplies candidate IDs/ranks ONLY, never authoritative text,
+            # document identity, revisions or roles. Fail closed on a failed SQL
+            # lookup, including for legacy Dense payloads carrying full text.
+            by_id: dict[int, tuple[float, dict[str, Any]]] = {}
             for hit in hits:
                 payload = dict(getattr(hit, "payload", {}) or {})
                 if scope != "QABUG" and not PrimarySpecificationDocumentPolicy.is_primary(
-                    file_name=str(payload.get("file_name") or ""),
-                    metadata=payload,
+                    file_name=str(payload.get("file_name") or ""), metadata=payload,
                 ):
-                    # Legacy Qdrant collections may still contain CoverSheet points.
-                    # Reject them before hydration/reranking; a rebuilt index will
-                    # remove them permanently through the same central policy.
+                    rejected_rows += 1
                     continue
-                content_id = payload.get("content_id", getattr(hit, "id", None))
                 try:
-                    cid = int(content_id)
-                except (TypeError, ValueError):
+                    cid = int(payload.get("content_id", getattr(hit, "id", None)))
+                    score = float(getattr(hit, "score", 0.0))
+                except (ValueError, TypeError):
+                    rejected_rows += 1
                     continue
-                ids.append(cid)
-                score_by_id[cid] = float(getattr(hit, "score", 0.0) or 0.0)
-                payload_by_id[cid] = payload
-                if str(payload.get("content") or "").strip():
-                    direct_payload_ids.add(cid)
-
-            # Prefer Qdrant payload text when present. Existing v5.7.0 indexes
-            # may be metadata-only, so legacy points are hydrated strictly by
-            # the Qdrant-selected content_id. This is dereferencing, not SQL
-            # candidate retrieval, and cannot introduce non-Qdrant knowledge.
-            # QA/BUG is a governed compliance-like corpus: even when Qdrant
-            # carries content, hydrate the selected chunk from PostgreSQL and
-            # compare content_hash so stale vector payload can never override
-            # the authoritative record. Specification collections retain the
-            # payload-fast path for backward compatibility.
-            missing_ids = list(ids) if scope == "QABUG" else [cid for cid in ids if cid not in direct_payload_ids]
-            row_by_id: dict[int, dict[str, Any]] = {}
-            if missing_ids:
-                if stage_callback:
-                    stage_callback("HYDRATE", f"按 Qdrant content_id 回取 {len(missing_ids)} 条原文…", 0)
-                try:
-                    rows = self._fetch_chunks(scope, missing_ids)
-                    row_by_id = {int(row["content_id"]): row for row in rows}
-                    hydrated_rows += len(rows)
-                except Exception:
-                    LOGGER.debug("Qdrant evidence hydration skipped for scope=%s", scope, exc_info=True)
-
-            for cid in ids:
-                payload = payload_by_id.get(cid) or {}
-                score = score_by_id.get(cid)
-                if cid in direct_payload_ids and scope != "QABUG":
-                    payload_rows += 1
-                    row = {
-                        "content_id": cid,
-                        "document_id": payload.get("document_id"),
-                        "file_name": payload.get("file_name"),
-                        "project_code": payload.get("project_code"),
-                        "specification_code": payload.get("spec_code") or payload.get("specification_code"),
-                        "specification_name": payload.get("specification_name"),
-                        "specification_version": payload.get("version") or payload.get("specification_version"),
-                        "chapter_title": payload.get("chapter_title"),
-                        "section_id": payload.get("section_id"),
-                        "section_title": payload.get("section_title"),
-                        "page_number": payload.get("page_number"),
-                        "chunk_index": payload.get("chunk_index"),
-                        "content_hash": payload.get("content_hash"),
-                        "content": payload.get("content"),
-                    }
+                if cid <= 0 or not math.isfinite(score):
+                    rejected_rows += 1
+                    continue
+                if cid not in by_id:
+                    by_id[cid] = (score, payload)
+            if not by_id:
+                continue
+            if stage_callback:
+                stage_callback("HYDRATE", f"PostgreSQL 验证 Qdrant {len(by_id)} 条候选原文…", 0)
+            try:
+                rows = self._fetch_chunks(scope, list(by_id))
+            except Exception:
+                LOGGER.warning("Rejecting unverified Dense hits scope=%s: PostgreSQL unavailable", scope, exc_info=True)
+                rejected_rows += len(by_id)
+                continue
+            hydrated_rows += len(rows)
+            authoritative = {int(row["content_id"]): row for row in rows}
+            for cid, (score, payload) in by_id.items():
+                row = authoritative.get(cid)
+                if row is None or not str(row.get("content") or "").strip():
+                    rejected_rows += 1
+                    continue
+                # Verify actual SQL content against its stored digest, then
+                # require the indexed digest to equal SQL. Optional or absent
+                # hashes are not evidence of integrity.
+                body_hash = hashlib.sha256(str(row["content"]).encode("utf-8")).hexdigest()
+                sql_hash = str(row.get("content_hash") or "").lower()
+                payload_hash = str(payload.get("content_hash") or "").lower()
+                if not sql_hash or not payload_hash or body_hash != sql_hash or sql_hash != payload_hash:
+                    LOGGER.warning("Skipping stale Qdrant hit scope=%s content_id=%s: hash verification failed", scope, cid)
+                    rejected_rows += 1
+                    continue
+                if scope != "QABUG":
+                    # A permissive legacy filename classifier is NOT proof of
+                    # SPEC_BODY; SQL's join to the documents role predicate is
+                    # authoritative, and identity must match the indexed point.
+                    identities = (
+                        ("project_code", "project_code"),
+                        ("document_id", "document_id"),
+                        ("file_name", "file_name"),
+                    )
+                    if (str(row.get("project_code") or "") != scope
+                            or not all(str(row.get(k) or "") and
+                                       str(row.get(k) or "") == str(payload.get(pk) or "")
+                                       for k, pk in identities)
+                            or any(str(row.get(k) or "") != str(payload.get(pk) or "")
+                                   for k, pk in (("specification_code", "spec_code"),
+                                                 ("specification_version", "version")))
+                            or not PrimarySpecificationDocumentPolicy.is_primary(
+                                file_name=str(row.get("file_name") or ""), metadata=row,
+                            )):
+                        rejected_rows += 1
+                        continue
                 else:
-                    row = row_by_id.get(cid)
-                    if not row:
+                    if observation_only and str(row.get("section_id") or "") not in ISSUE_OBSERVATION_SECTIONS:
+                        rejected_rows += 1
                         continue
-                    payload_hash = str(payload.get("content_hash") or "")
-                    sql_hash = str(row.get("content_hash") or "")
-                    if payload_hash and sql_hash and payload_hash != sql_hash:
-                        LOGGER.warning(
-                            "Skipping stale Qdrant hit scope=%s content_id=%s: payload hash != SQL hash",
-                            scope, cid,
-                        )
+                    # Issue payload may omit some fields for old indexes, but
+                    # supplied document identity must never contradict SQL.
+                    if any(str(row.get(k) or "") != str(payload[k])
+                           for k in ("project_code", "document_id", "file_name") if k in payload):
+                        rejected_rows += 1
                         continue
-                    if scope == "QABUG":
-                        hydrated_rows += 0  # counter is already updated when rows were fetched
                 md = dict(payload)
-                md["knowledge_origin"] = "QDRANT"
-                md["hydration"] = "POSTGRES_HASH_VERIFIED" if scope == "QABUG" else ("QDRANT_PAYLOAD" if cid in direct_payload_ids else "POSTGRES_BY_QDRANT_CONTENT_ID")
+                if scope=="QABUG" and observation_only:
+                    md.update(issue_key=str(row.get("issue_key") or ""),record_key=str(row.get("document_id") or ""),
+                              section_type=str(row.get("section_id") or ""))
+                md.update({
+                    "knowledge_origin": "QDRANT",
+                    "hydration": "POSTGRES_HASH_AND_IDENTITY_VERIFIED",
+                    "source_authority": "POSTGRESQL",
+                    "content_hash": sql_hash,
+                    "ranking_only": True,
+                })
+                if scope != "QABUG":
+                    md["evidence_role"] = "PRIMARY_CONTENT"
+                    md["identity_verified"] = bool(str(row.get("specification_code") or "").strip())
+                    if not md["identity_verified"]:
+                        md["identity_limitation"] = "Physical SQL body verified; numeric specification assignment is unverified"
                 items.append(self._chunk_to_evidence(scope, row, source_type, score, md))
 
         metrics["hydration_ms"] = int((time.perf_counter() - hydration_started) * 1000)
-        if stage_callback and (hydrated_rows or payload_rows):
+        if stage_callback:
             stage_callback(
                 "HYDRATE",
-                f"Evidence 原文就绪 · Qdrant payload={payload_rows} · content_id回取={hydrated_rows} · {metrics['hydration_ms']} ms",
+                f"SQL已验证 {len(items)} 条 · 拒绝 {rejected_rows} 条 · {metrics['hydration_ms']} ms",
                 metrics["hydration_ms"],
             )
         items.sort(key=lambda item: float(item.score or 0.0), reverse=True)
@@ -2542,6 +3490,11 @@ class EnterpriseRetriever:
             raise RuntimeError(f"PostgreSQL profile for {scope} is not configured")
         kwargs = profile.dsn_kwargs()
         kwargs["password"] = self.postgres_password
+        from app.ai.retrieval_deadline import remaining_ms
+        remaining=remaining_ms()
+        if remaining is not None:
+            kwargs["connect_timeout"]=max(1,min(3,(remaining+999)//1000))
+            kwargs["options"]=f"-c default_transaction_read_only=on -c statement_timeout={max(1,min(5000,remaining))} -c lock_timeout=1000"
         return psycopg.connect(**kwargs, row_factory=dict_row)
 
     def _fetch_chunks(self, scope: str, content_ids: list[int]) -> list[dict[str, Any]]:
@@ -2553,6 +3506,7 @@ class EnterpriseRetriever:
                 cur.execute(
                     f"""
                     SELECT content_id, document_id, file_name, project_code,
+                           issue_key,
                            specification_code, specification_name, specification_version,
                            chapter_title, section_id, section_title, page_number,
                            chunk_index, content_hash, content
@@ -2615,7 +3569,7 @@ class EnterpriseRetriever:
                 SELECT rc.content_id, rc.document_id, rc.file_name, rc.project_code,
                        rc.specification_code, rc.specification_name, rc.specification_version,
                        rc.chapter_title, rc.section_id, rc.section_title, rc.page_number,
-                       rc.chunk_index, rc.content
+                       rc.chunk_index, rc.content, rc.content_hash
                 FROM public.rag_current_chunks rc
                 JOIN public.documents d ON d.document_id = rc.document_id
                 WHERE LENGTH(BTRIM(rc.content)) > 0
@@ -2636,7 +3590,18 @@ class EnterpriseRetriever:
                 continue
             successful_scopes += 1
             for row in rows:
-                result.append(self._chunk_to_evidence(scope, row, "SQL_EXACT", None, {}))
+                # SQL remains the primary authority, but a damaged or missing
+                # digest is not a valid traceable engineering original.
+                content = str(row.get("content") or "")
+                digest = str(row.get("content_hash") or "").lower()
+                if not content.strip() or not digest or hashlib.sha256(content.encode("utf-8")).hexdigest() != digest:
+                    LOGGER.warning("Skipping corrupt SQL exact chunk scope=%s content_id=%s", scope, row.get("content_id"))
+                    continue
+                result.append(self._chunk_to_evidence(
+                    scope, row, "SQL_EXACT", None,
+                    {"content_hash": row.get("content_hash"), "evidence_role": "PRIMARY_CONTENT",
+                     "source_authority": "POSTGRESQL"},
+                ))
                 if len(result) >= self.top_k:
                     return result
         if failed_scopes and not successful_scopes:
@@ -2805,6 +3770,486 @@ class EnterpriseRetriever:
             return f"{clean_code} {clean_name}"
         return clean_name or clean_code or str(fallback or "Unresolved target").strip()
 
+    def _deterministic_section_reference_search(
+        self, question: str, scopes: Iterable[str], *, spec_codes: tuple[str, ...] = (),
+    ) -> list[EvidenceItem]:
+        """Read source-exact cross-spec section citations without review authority.
+
+        Distinct from CONTENT_RELATION: this proves a source paragraph *refers
+        to* a target section, never a requirement dependency or impact. A
+        multi-unit section is shown as a section, not guessed as one target unit.
+        """
+        from app.engineering_intelligence.deterministic_read_models import (
+            verify_requirement_span, verify_section_reference,
+        )
+        from app.engineering_intelligence.relations import extract_reference_anchors
+
+        codes = list(spec_codes)
+        if not codes:
+            # Entity discovery through existing project-scoped exact/name lookup;
+            # no broad unrestricted scan of every requirement in the library.
+            found, _ = self._specification_lookup(question, tuple(scopes))
+            codes = list(dict.fromkeys(str(x.specification_code) for x in found
+                                        if x.specification_code))[:8]
+        if not codes:
+            return []
+        primary_sd = PrimarySpecificationDocumentPolicy.sql_primary_predicate('sd')
+        preferred_source = PrimarySpecificationDocumentPolicy.sql_preferred_body_version_id('ss')
+        primary_td = PrimarySpecificationDocumentPolicy.sql_primary_predicate('td')
+        preferred_target = PrimarySpecificationDocumentPolicy.sql_preferred_body_version_id('ts')
+        result: list[EvidenceItem] = []
+        seen: set[tuple[str, int, str, str]] = set()
+        for scope in scopes:
+            if scope == 'QABUG' or scope not in self.postgres_profiles:
+                continue
+            with self._connect(scope) as conn, conn.cursor() as cur:
+                cur.execute("SET TRANSACTION READ ONLY")
+                # Bounded, indexable source-code path and bounded inbound
+                # target-code lexical path. No user input is SQL-interpolated.
+                cur.execute(f"""
+                    SELECT su.id AS source_unit_id, ss.spec_code AS source_code,
+                           su.document_id AS source_document,
+                           su.content_id AS source_content_id,
+                           su.section_id AS source_section, su.page_number AS source_page,
+                           su.start_offset AS source_start, su.end_offset AS source_end,
+                           su.raw_text AS source_text, su.text_hash AS source_hash,
+                           su.review_status AS source_review_status,
+                           sc.content AS source_chunk, sv.version_label AS source_version,
+                           sd.file_name AS source_file
+                    FROM public.ei_requirement_units su
+                    JOIN public.specifications ss ON ss.id=su.specification_id
+                    JOIN public.specification_versions sv ON sv.id=su.version_id
+                    JOIN public.documents sd ON sd.document_id=su.document_id
+                    JOIN public.contents sc ON sc.id=su.content_id AND sc.document_id=su.document_id
+                    WHERE ss.project_code=%s AND sv.id={preferred_source}
+                      AND sv.specification_id=ss.id AND sv.document_id=su.document_id
+                      AND sv.branch_name='MAIN' AND {primary_sd}
+                      AND su.raw_text ~* '(refer|according|defined|specified|see|spec|参照|引用|依据|準拠|根据)'
+                      AND (ss.spec_code=ANY(%s::TEXT[]) OR su.raw_text ILIKE ANY(%s::TEXT[]))
+                    ORDER BY su.id DESC LIMIT 241
+                """, (scope, codes, [f'%{code}%' for code in codes]))
+                sources = [dict(x) for x in cur.fetchall()]
+                # Don't misrepresent a truncated source set as a complete graph.
+                if len(sources) > 240:
+                    LOGGER.warning('Structural reference scan exceeded 240 source units for %s; refine query', scope)
+                    continue
+                for source in sources:
+                    if source.get('source_review_status') == 'REJECTED' or not verify_requirement_span(source, 'source'):
+                        continue
+                    anchors = extract_reference_anchors(str(source['source_text']))
+                    for anchor in anchors[:8]:
+                        if source['source_code'] not in codes and anchor.specification_code not in codes:
+                            continue
+                        key = (scope, int(source['source_unit_id']), anchor.specification_code, anchor.section_id)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        cur.execute(f"""
+                            SELECT ts.spec_code AS target_code,
+                                   tu.document_id AS target_document,
+                                   tu.content_id AS target_content_id,
+                                   tu.section_id AS target_section, tu.page_number AS target_page,
+                                   tu.start_offset AS target_start, tu.end_offset AS target_end,
+                                   tu.raw_text AS target_text, tu.text_hash AS target_hash,
+                                   tu.review_status AS target_review_status,
+                                   tc.content AS target_chunk, tv.version_label AS target_version,
+                                   td.file_name AS target_file
+                            FROM public.ei_requirement_units tu
+                            JOIN public.specifications ts ON ts.id=tu.specification_id
+                            JOIN public.specification_versions tv ON tv.id=tu.version_id
+                            JOIN public.documents td ON td.document_id=tu.document_id
+                            JOIN public.contents tc ON tc.id=tu.content_id AND tc.document_id=tu.document_id
+                            WHERE ts.project_code=%s AND ts.spec_code=%s
+                              AND tv.id={preferred_target} AND tv.specification_id=ts.id
+                              AND tv.document_id=tu.document_id AND tv.branch_name='MAIN'
+                              AND tu.section_id=%s AND {primary_td}
+                            ORDER BY tu.id LIMIT 9
+                        """, (scope, anchor.specification_code, anchor.section_id))
+                        targets = [dict(x) for x in cur.fetchall()]
+                        if not targets or len(targets) > 8:
+                            continue  # missing/oversized section; never infer an endpoint
+                        if not all(t.get('target_review_status') != 'REJECTED'
+                                   and verify_section_reference(source, t) for t in targets):
+                            continue  # reject entire section on *any* evidence drift
+                        # Purely structural reference: multiple units still mean
+                        # one section endpoint, NOT multiple requirement dependencies.
+                        target = targets[0]
+                        excerpts = [
+                            f"§{t['target_section']} page {t['target_page'] or '-'} "
+                            f"unit {t['target_content_id']} offsets {t['target_start']}:{t['target_end']} "
+                            f"SHA256 {str(t['target_hash']).strip()}\n{str(t['target_text'])[:1600]}"
+                            for t in targets
+                        ]
+                        content = (
+                            f"[RULE-VERIFIED SECTION REFERENCE, NOT HUMAN-REVIEWED DEPENDENCY] "
+                            f"{source['source_code']} v{source['source_version']} §{source['source_section']} "
+                            f"→ {anchor.specification_code} v{target['target_version']} §{anchor.section_id}\n"
+                            f"Exact reference: {anchor.raw_text}\n"
+                            f"Source page {source['source_page'] or '-'}, offsets "
+                            f"{source['source_start']}:{source['source_end']}, "
+                            f"SHA256 {str(source['source_hash']).strip()}\n"
+                            f"Source verbatim: {str(source['source_text'])[:1600]}\n"
+                            f"Target section contains {len(targets)} verified requirement unit(s):\n"
+                            + '\n'.join(excerpts)
+                            + '\nLimit: explicit citation only; no proof of dependency, equivalence, '
+                              'compliance, conflict or change impact.'
+                        )
+                        result.append(EvidenceItem(
+                            evidence_id='', scope=scope, source_type='STRUCTURAL_REFERENCE',
+                            content=content, score=0.82,
+                            content_id=int(source['source_content_id']),
+                            document_id=str(source['source_document']),
+                            file_name=str(source['source_file']),
+                            specification_code=str(source['source_code']),
+                            specification_version=str(source['source_version']),
+                            section_id=str(source['source_section']),
+                            page_number=source['source_page'],
+                            metadata={
+                                'status': 'RULE_VERIFIED', 'authority': 'EXPLICIT_REFERENCE_ONLY',
+                                'target_version_selection': 'PREFERRED_MAIN_SPEC_BODY',
+                                'evidence_role': 'PRIMARY_CONTENT',
+                                'interpretation_limit': 'SECTION_CITATION_NOT_ENGINEERING_DEPENDENCY',
+                                'anchor': {'raw_text': anchor.raw_text,
+                                           'start_offset': anchor.start_offset,
+                                           'end_offset': anchor.end_offset},
+                                'source': {'document_id': source['source_document'],
+                                           'content_id': source['source_content_id'],
+                                           'page': source['source_page'], 'section': source['source_section'],
+                                           'text_hash': str(source['source_hash']).strip()},
+                                'target': {'spec_code': anchor.specification_code,
+                                           'version': target['target_version'],
+                                           'section': anchor.section_id,
+                                           'unit_count': len(targets),
+                                           'units': [{'document_id': t['target_document'],
+                                                      'content_id': t['target_content_id'],
+                                                      'page': t['target_page'],
+                                                      'text_hash': str(t['target_hash']).strip()}
+                                                     for t in targets]},
+                            },
+                        ))
+                        if len(result) >= min(20, max(self.top_k * 2, 8)):
+                            return result
+        return result
+
+    def _deterministic_layout_relation_search(
+        self, question: str, scopes: Iterable[str], *, spec_codes: tuple[str, ...] = (),
+    ) -> list[EvidenceItem]:
+        """Read verifiable within-body section/layout facts, never causal links.
+
+        No new graph table, write access, reviewer status or unbounded scan.
+        Index order means adjacent *extracted* units, not adjacent PDF blocks.
+        """
+        from app.engineering_intelligence.deterministic_read_models import (
+            section_selector, structural_unit_pair,
+        )
+        codes = list(dict.fromkeys(spec_codes))[:8]
+        if not codes:
+            found, _ = self._specification_lookup(question, tuple(scopes))
+            codes = list(dict.fromkeys(str(x.specification_code) for x in found
+                                        if x.specification_code))[:8]
+        if not codes:
+            return []
+        section = section_selector(question)
+        direct_parent = section.rpartition('.')[0] if '.' in section else ''
+        primary_sd = PrimarySpecificationDocumentPolicy.sql_primary_predicate('sd')
+        preferred_body = PrimarySpecificationDocumentPolicy.sql_preferred_body_version_id('ss')
+        result: list[EvidenceItem] = []
+        for scope in scopes:
+            if scope == 'QABUG' or scope not in self.postgres_profiles:
+                continue
+            with self._connect(scope) as conn, conn.cursor() as cur:
+                cur.execute('SET TRANSACTION READ ONLY')
+                for code in codes:
+                    cur.execute(f"""
+                        SELECT su.id AS unit_id, su.document_id, su.version_id,
+                               su.content_id, su.section_id, su.page_number,
+                               su.start_offset, su.end_offset, su.raw_text,
+                               su.text_hash, su.review_status, sc.content AS chunk, ss.spec_code,
+                               sv.version_label, sd.file_name,
+                               next_indexed.next_unit_id
+                        FROM public.ei_requirement_units su
+                        JOIN public.specifications ss ON ss.id=su.specification_id
+                        JOIN public.specification_versions sv ON sv.id=su.version_id
+                        JOIN public.documents sd ON sd.document_id=su.document_id
+                        JOIN public.contents sc ON sc.id=su.content_id AND sc.document_id=su.document_id
+                        LEFT JOIN LATERAL (
+                            SELECT following.id AS next_unit_id
+                            FROM public.ei_requirement_units following
+                            WHERE following.document_id=su.document_id
+                              AND following.version_id=su.version_id
+                              AND following.content_id=su.content_id
+                              AND (following.start_offset, following.end_offset, following.id)
+                                  > (su.start_offset, su.end_offset, su.id)
+                            ORDER BY following.start_offset, following.end_offset, following.id
+                            LIMIT 1
+                        ) next_indexed ON TRUE
+                        WHERE ss.project_code=%s AND ss.spec_code=%s
+                          AND sv.id={preferred_body} AND sv.specification_id=ss.id
+                          AND sv.document_id=su.document_id AND sv.branch_name='MAIN'
+                          AND {primary_sd}
+                          AND (%s='' OR su.section_id=%s OR su.section_id LIKE %s
+                               OR (%s<>'' AND su.section_id=%s))
+                        ORDER BY su.content_id, su.start_offset, su.id LIMIT 121
+                    """, (scope, code, section, section, section + '.%', direct_parent, direct_parent))
+                    rows = [dict(x) for x in cur.fetchall()]
+                    if len(rows) > 120:
+                        LOGGER.warning('Structural layout scan exceeded 120 units for %s/%s', scope, code)
+                        continue  # incomplete input must not imply consecutive units
+                    rows.sort(key=lambda r: (str(r.get('document_id')), int(r['content_id']),
+                                             int(r['start_offset']), int(r['unit_id'])))
+                    # The DB computes the next unit over *all* indexed units
+                    # before the section filter.  Comparing adjacent filtered
+                    # rows alone is incorrect when a §4.2 unit was removed.
+                    adjacent_pairs = {
+                        (int(left['unit_id']), int(right['unit_id']))
+                        for left, right in zip(rows, rows[1:])
+                        if (left['document_id'] == right['document_id']
+                            and left['version_id'] == right['version_id']
+                            and left['content_id'] == right['content_id']
+                            and left.get('next_unit_id') is not None
+                            and int(left['next_unit_id']) == int(right['unit_id']))
+                    }
+                    sections: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+                    for row in rows:
+                        group = (str(row['document_id']), str(row['version_id']), str(row['section_id']))
+                        sections.setdefault(group, []).append(row)
+
+                    pairs: list[tuple[dict[str, Any], dict[str, Any], bool]] = []
+                    for (doc, version, sec), members in sections.items():
+                        # Same section and adjacent-indexed-unit are distinct
+                        # structural facts, both shown without causal semantics.
+                        if len(members) >= 2:
+                            for a, b in zip(members, members[1:]):
+                                adjacent = ((int(a['unit_id']), int(b['unit_id'])) in adjacent_pairs
+                                            and int(a['end_offset']) <= int(b['start_offset']))
+                                pairs.append((a, b, adjacent))
+                        # Direct section-parent relation (4 -> 4.1, not 4 -> 4.1.2).
+                        for (other_doc, other_version, child_section), children in sections.items():
+                            if (other_doc == doc and other_version == version
+                                    and child_section.startswith(sec + '.')
+                                    and child_section.count('.') == sec.count('.') + 1):
+                                pairs.append((members[0], children[0], False))
+                    for a, b, consecutive in pairs:
+                        if a.get('review_status') == 'REJECTED' or b.get('review_status') == 'REJECTED':
+                            continue
+                        source = {
+                            'source_document': a['document_id'], 'source_version_id': a['version_id'],
+                            'source_code': a['spec_code'], 'source_unit_id': a['unit_id'],
+                            'source_content_id': a['content_id'], 'source_section': a['section_id'],
+                            'source_page': a['page_number'], 'source_start': a['start_offset'],
+                            'source_end': a['end_offset'], 'source_text': a['raw_text'],
+                            'source_hash': a['text_hash'], 'source_chunk': a['chunk'],
+                        }
+                        target = {
+                            'target_document': b['document_id'], 'target_version_id': b['version_id'],
+                            'target_code': b['spec_code'], 'target_unit_id': b['unit_id'],
+                            'target_content_id': b['content_id'], 'target_section': b['section_id'],
+                            'target_page': b['page_number'], 'target_start': b['start_offset'],
+                            'target_end': b['end_offset'], 'target_text': b['raw_text'],
+                            'target_hash': b['text_hash'], 'target_chunk': b['chunk'],
+                        }
+                        kind = structural_unit_pair(source, target, consecutive_in_chunk=consecutive)
+                        if not kind:
+                            continue
+                        meaning = {
+                            'ADJACENT_INDEXED_UNITS': 'Consecutive extracted units in one content chunk',
+                            'SAME_SECTION': 'Both units carry the same exact section ID',
+                            'PARENT_CHILD_SECTION': 'Direct parent/child section-ID hierarchy',
+                        }[kind]
+                        content = (
+                            f'[RULE-VERIFIED LAYOUT · {kind} · NOT DEPENDENCY] '
+                            f"{code} v{a['version_label']}: {meaning}\n"
+                            f"A §{a['section_id']} page {a['page_number'] or '-'} "
+                            f"offset {a['start_offset']}:{a['end_offset']} SHA256 {a['text_hash']}: "
+                            f"{str(a['raw_text'])[:1100]}\n"
+                            f"B §{b['section_id']} page {b['page_number'] or '-'} "
+                            f"offset {b['start_offset']}:{b['end_offset']} SHA256 {b['text_hash']}: "
+                            f"{str(b['raw_text'])[:1100]}\n"
+                            'Limit: document layout/index order only; no engineering dependency or change impact.'
+                        )
+                        result.append(EvidenceItem(
+                            evidence_id='', scope=scope, source_type='STRUCTURAL_LAYOUT',
+                            content=content, score=0.65,
+                            content_id=int(a['content_id']), document_id=str(a['document_id']),
+                            file_name=str(a['file_name']), specification_code=str(code),
+                            specification_version=str(a['version_label']),
+                            section_id=str(a['section_id']), page_number=a['page_number'],
+                            metadata={
+                                'status': 'RULE_VERIFIED', 'authority': 'LAYOUT_ONLY',
+                                'relation_kind': kind, 'evidence_role': 'PRIMARY_CONTENT',
+                                'interpretation_limit': 'DOCUMENT_STRUCTURE_NOT_DEPENDENCY',
+                                'source': {'unit_id': a['unit_id'], 'document_id': a['document_id'],
+                                           'content_id': a['content_id'], 'hash': a['text_hash'],
+                                           'page': a['page_number'], 'section': a['section_id']},
+                                'target': {'unit_id': b['unit_id'], 'document_id': b['document_id'],
+                                           'content_id': b['content_id'], 'hash': b['text_hash'],
+                                           'page': b['page_number'], 'section': b['section_id']},
+                            },
+                        ))
+                        if len(result) >= min(16, max(6, self.top_k * 2)):
+                            return result
+        return result
+
+    @staticmethod
+    def _joint_reference_change_alerts(
+        relation_items: list[EvidenceItem], version_items: list[EvidenceItem],
+    ) -> list[EvidenceItem]:
+        """Reference-target diff = revalidation prompt, NOT stale/impact claim."""
+        from app.engineering_intelligence.deterministic_read_models import join_reference_and_diff
+        alerts: list[EvidenceItem] = []
+        seen: set[tuple[Any, ...]] = set()
+        for ref in relation_items:
+            for diff in version_items:
+                md = join_reference_and_diff(ref, diff)
+                if not md:
+                    continue
+                key = (ref.scope, ref.document_id, md['reference_source_hash'],
+                       md['change_set_id'], md['change_id'])
+                if key in seen:
+                    continue
+                seen.add(key)
+                alerts.append(EvidenceItem(
+                    evidence_id='', scope=ref.scope, source_type='REFERENCE_CHANGE_REVALIDATION',
+                    score=0.60, content=(
+                        '[JOINT EXTRACTIVE EVIDENCE · REVALIDATION REQUIRED, NOT INVALIDATED] '
+                        f"Source {ref.specification_code} v{ref.specification_version} §{ref.section_id} "
+                        f"references {md['target_spec_code']} §{md['target_section']}; "
+                        f"that target section has persisted {md['from_version']} → {md['to_version']} "
+                        f"change #{md['change_id']}.\n"
+                        f"Reference original: {ref.content[:2000]}\n"
+                        f"Persisted difference: {diff.content[:2400]}\n"
+                        'Limit: no proof of broken dependency, functional impact or compliance.'
+                    ), document_id=ref.document_id, specification_code=ref.specification_code,
+                    specification_version=ref.specification_version,
+                    section_id=ref.section_id, page_number=ref.page_number,
+                    metadata={**md, 'evidence_role': 'PRIMARY_CONTENT',
+                              'prior_relation_validity': 'UNDETERMINED',
+                              'source_version_alignment': 'NOT_ESTABLISHED',
+                              'human_revalidation_required': True},
+                ))
+                if len(alerts) >= 8:
+                    return alerts
+        return alerts
+
+    def _chapter_version_diff_search(
+        self, question: str, scopes: Iterable[str],
+    ) -> list[EvidenceItem]:
+        """Extract hash-verified section/keyword diffs from READY body-to-body cache.
+
+        No speculative semantic equivalence, no on-demand mutation or diff
+        generation. An absent READY comparison is *not* evidence of no change.
+        """
+        from app.engineering_intelligence.deterministic_read_models import (
+            keyword_selector, matches_change_selector, section_selector,
+            verify_persisted_diff,
+        )
+        section, keyword = section_selector(question), keyword_selector(question)
+        if not section and not keyword:
+            return []  # legacy history query already handles unfiltered requests
+        # Strip explicitly selected section before looking for revision numerals.
+        # Otherwise §4.1 would be misclassified as software version 4.1.
+        without_section = re.sub(
+            r'(?:section|sec\.?|§|章节|章節|第\s*)\s*[1-9]\d*(?:\.\d+){0,6}(?:\s*章)?',
+            ' ', question, flags=re.I,
+        )
+        requested = self._version_labels_in_question(without_section)[:2]
+        primary_fd = PrimarySpecificationDocumentPolicy.sql_primary_predicate('fd')
+        primary_td = PrimarySpecificationDocumentPolicy.sql_primary_predicate('td')
+        result: list[EvidenceItem] = []
+        for scope in scopes:
+            if scope == 'QABUG' or scope not in self.postgres_profiles:
+                continue
+            specs, _ = self._specification_lookup(question, (scope,))
+            spec_ids = list(dict.fromkeys(
+                int(x.metadata.get('specification_id') or 0) for x in specs
+                if int(x.metadata.get('specification_id') or 0) > 0
+            ))[:8]
+            if not spec_ids:
+                continue
+            with self._connect(scope) as conn, conn.cursor() as cur:
+                cur.execute('SET TRANSACTION READ ONLY')
+                for spec_id in spec_ids:
+                    cur.execute(f"""
+                        SELECT cs.id AS change_set_id, sp.spec_code,
+                               fv.version_label AS from_version, tv.version_label AS to_version,
+                               fv.document_id AS from_document, tv.document_id AS to_document
+                        FROM public.specification_change_sets cs
+                        JOIN public.specifications sp ON sp.id=cs.specification_id
+                        JOIN public.specification_versions fv ON fv.id=cs.from_version_id
+                        JOIN public.specification_versions tv ON tv.id=cs.to_version_id
+                        JOIN public.documents fd ON fd.document_id=fv.document_id
+                        JOIN public.documents td ON td.document_id=tv.document_id
+                        WHERE cs.specification_id=%s AND sp.project_code=%s
+                          AND cs.status='READY' AND cs.branch_name='MAIN'
+                          AND fv.specification_id=sp.id AND tv.specification_id=sp.id
+                          AND fv.branch_name='MAIN' AND tv.branch_name='MAIN'
+                          AND {primary_fd} AND {primary_td}
+                        ORDER BY cs.updated_at DESC, cs.id DESC LIMIT 80
+                    """, (spec_id, scope))
+                    change_sets = [dict(x) for x in cur.fetchall()]
+                    selected = []
+                    for row in change_sets:
+                        a, b = str(row['from_version']), str(row['to_version'])
+                        if len(requested) == 2 and not (
+                            (self._version_label_matches(a, requested[0]) and self._version_label_matches(b, requested[1]))
+                            or (self._version_label_matches(a, requested[1]) and self._version_label_matches(b, requested[0]))
+                        ):
+                            continue
+                        if len(requested) == 1 and not any(self._version_label_matches(v, requested[0]) for v in (a, b)):
+                            continue
+                        selected.append(row)
+                    for change_set in selected[:2]:
+                        cur.execute("""
+                            SELECT id, change_type, chapter_id, chapter_title,
+                                   section_id, section_title, old_text, old_hash,
+                                   new_text, new_hash, old_page_number, new_page_number
+                            FROM public.specification_changes
+                            WHERE change_set_id=%s
+                            ORDER BY id LIMIT 401
+                        """, (change_set['change_set_id'],))
+                        changes = [dict(x) for x in cur.fetchall()]
+                        if len(changes) > 400:
+                            LOGGER.warning('Version change set %s exceeds bounded scan', change_set['change_set_id'])
+                            continue
+                        for row in changes:
+                            if not matches_change_selector(row, section, keyword) or not verify_persisted_diff(row):
+                                continue
+                            def excerpt(value: Any) -> str:
+                                text = str(value or '')
+                                return text if len(text) <= 1800 else text[:1800] + ' [TRUNCATED; consult persisted diff]'
+                            content = (
+                                f"[PERSISTED STRUCTURAL DIFF · BODY→BODY] "
+                                f"{change_set['spec_code']} {change_set['from_version']} → {change_set['to_version']} "
+                                f"§{row.get('section_id') or row.get('chapter_id') or '-'} {row['change_type']}\n"
+                                f"OLD page {row.get('old_page_number') or '-'}: {excerpt(row.get('old_text'))}\n"
+                                f"NEW page {row.get('new_page_number') or '-'}: {excerpt(row.get('new_text'))}\n"
+                                'Limit: persisted section text difference; does not determine engineering impact.'
+                            )
+                            result.append(EvidenceItem(
+                                evidence_id='', scope=scope, source_type='CHAPTER_VERSION_DIFF',
+                                content=content, score=0.87,
+                                document_id=str(change_set['to_document']),
+                                specification_code=str(change_set['spec_code']),
+                                specification_version=str(change_set['to_version']),
+                                section_id=str(row.get('section_id') or row.get('chapter_id') or ''),
+                                page_number=row.get('new_page_number') or row.get('old_page_number'),
+                                metadata={
+                                    'evidence_role': 'PRIMARY_CONTENT', 'change_type': row['change_type'],
+                                    'from_version': change_set['from_version'],
+                                    'to_version': change_set['to_version'],
+                                    'from_document': change_set['from_document'],
+                                    'to_document': change_set['to_document'],
+                                    'change_id': row['id'], 'change_set_id': change_set['change_set_id'],
+                                    'old_page': row['old_page_number'], 'new_page': row['new_page_number'],
+                                    'old_hash': row['old_hash'], 'new_hash': row['new_hash'],
+                                    'query_section': section, 'query_keyword': keyword,
+                                    'interpretation_limit': 'PERSISTED_SECTION_DIFF_NOT_IMPACT_ANALYSIS',
+                                },
+                            ))
+                            if len(result) >= min(20, max(self.top_k * 2, 8)):
+                                return result
+        return result
+
     def _requirement_version_search(
         self, scopes: Iterable[str], *, spec_codes: tuple[str, ...] = (),
     ) -> list[EvidenceItem]:
@@ -2868,38 +4313,203 @@ class EnterpriseRetriever:
                     ))
         return evidence
 
+    def _bug_spec_candidate_search(self, question: str) -> list[EvidenceItem]:
+        """Exact-key, version-bound, independently rehashed, display-only results.
+
+        No cross-DB joins or table names from user input. The QA database
+        records the approved mapping and snapshot, but the specification DB
+        is re-read to exclude stale evidence and Coversheets at query time.
+        """
+        from app.engineering_intelligence.bug_spec_candidates import (
+            SpecUnitSnapshot, source_digest,
+        )
+
+        match = re.search(r"(?<![A-Z0-9])(?!SPEC-)([A-Z][A-Z0-9]{1,19}-\d{1,10})(?![A-Z0-9])", question, re.I)
+        if not match or 'QABUG' not in self.postgres_profiles:
+            return []
+        issue_key = match.group(1).upper()
+        requested_codes = self._entity_spec_codes((), question)
+        with self._connect('QABUG') as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT c.*, m.status AS mapping_status, m.issue_version_field,
+                       m.software_version AS mapped_software_version,
+                       m.model AS mapped_model, m.destination AS mapped_destination,
+                       r.record_type, r.summary, r.description, r.affected_version,
+                       r.software_version, r.model, r.destination,
+                       b.phenomenon, b.repro_steps, b.expected_result, b.actual_result
+                FROM public.qabug_spec_candidates c
+                JOIN public.qabug_records r ON r.id=c.bug_record_id
+                JOIN public.bug_details b ON b.record_id=r.id
+                JOIN public.qabug_software_spec_versions m ON m.id=c.mapping_id
+                WHERE c.issue_key=%s AND r.issue_key=%s AND r.record_type='BUG'
+                  AND r.is_current AND r.is_queryable
+                  AND c.status='UNREVIEWED' AND m.status='APPROVED'
+                  AND c.spec_scope=m.spec_scope AND c.spec_code=m.spec_code
+                  AND c.spec_version_id=m.spec_version_id
+                  AND c.spec_version_label=m.spec_version_label
+                  AND c.spec_document_id=m.spec_document_id
+                  AND m.model=COALESCE(r.model,'')
+                  AND m.destination=COALESCE(r.destination,'')
+                  AND ((m.issue_version_field='affected_version'
+                      AND m.software_version=r.affected_version)
+                    OR (m.issue_version_field='software_version'
+                      AND m.software_version=r.software_version))
+                ORDER BY c.rank_score DESC, c.id LIMIT %s
+            """, (issue_key, issue_key, min(12, max(4, self.top_k))))
+            rows = [dict(r) for r in cur.fetchall()]
+        results: list[EvidenceItem] = []
+        primary = PrimarySpecificationDocumentPolicy.sql_primary_predicate('d')
+        for row in rows:
+            if (source_digest(row) != str(row['issue_snapshot_hash']).strip()
+                    or (requested_codes and str(row['spec_code']).upper() not in requested_codes)
+                    or row['spec_scope'] not in {'21MM','24MM','COMMON'}
+                    or row['spec_scope'] not in self.postgres_profiles):
+                continue
+            # Validate identity, historical revision, source bytes & offsets
+            # from the authoritative spec DB; reject cached row on any drift.
+            try:
+                with self._connect(row['spec_scope']) as conn, conn.cursor() as cur:
+                    cur.execute(f"""
+                        SELECT sp.spec_code, sv.id AS version_id, sv.version_label,
+                               sv.document_id, d.file_name, d.metadata,
+                               u.id AS unit_id, u.content_id, u.section_id,
+                               u.page_number, u.start_offset, u.end_offset,
+                               u.raw_text, u.text_hash, c.content AS chunk_text
+                        FROM public.ei_requirement_units u
+                        JOIN public.specification_versions sv
+                          ON sv.id=u.version_id AND sv.specification_id=u.specification_id
+                          AND sv.document_id=u.document_id
+                        JOIN public.specifications sp ON sp.id=sv.specification_id
+                        JOIN public.documents d ON d.document_id=sv.document_id
+                        JOIN public.contents c ON c.id=u.content_id AND c.document_id=u.document_id
+                        WHERE u.id=%s AND u.version_id=%s AND sp.spec_code=%s
+                          AND sp.project_code=%s AND sv.version_label=%s
+                          AND sv.document_id=%s AND {primary}
+                    """, (row['spec_unit_id'], row['spec_version_id'], row['spec_code'],
+                          row['spec_scope'], row['spec_version_label'],row['spec_document_id']))
+                    current = cur.fetchone()
+                if not current:
+                    continue
+                unit = SpecUnitSnapshot(
+                    scope=row['spec_scope'], spec_code=current['spec_code'],
+                    version_id=current['version_id'], version_label=current['version_label'],
+                    document_id=current['document_id'],file_name=current['file_name'],
+                    document_metadata=current['metadata'] or {}, unit_id=current['unit_id'],
+                    content_id=current['content_id'],section_id=current['section_id'],
+                    page_number=current['page_number'],start_offset=current['start_offset'],
+                    end_offset=current['end_offset'],raw_text=current['raw_text'],
+                    text_hash=current['text_hash'],chunk_text=current['chunk_text'])
+                if (not unit.verify() or unit.text_hash.strip() != str(row['spec_text_hash']).strip()
+                        or unit.raw_text != row['spec_raw_text']
+                        or unit.file_name != row['spec_file_name']
+                        or unit.content_id != row['spec_content_id']
+                        or unit.start_offset != row['start_offset'] or unit.end_offset != row['end_offset']):
+                    continue
+            except Exception:
+                LOGGER.warning('Historical BUG candidate %s source recheck failed',row['id'],exc_info=True)
+                continue
+            phenomenon = row.get('phenomenon') or row.get('actual_result') or row.get('description') or row.get('summary') or ''
+            content = (
+                f"[UNREVIEWED · DISPLAY ONLY · NOT ENGINEERING EVIDENCE] BUG {issue_key} "
+                f"software={row['mapped_software_version']} "
+                f"→ SPEC {unit.spec_code} v{unit.version_label} §{unit.section_id} "
+                f"page={unit.page_number or '-'}\n"
+                f"BUG phenomenon (verbatim): {str(phenomenon)[:1800]}\n"
+                f"SPEC_BODY verbatim: {unit.raw_text[:1800]}\n"
+                "Lexical retrieval only. No conformance, violation, causality, or "
+                "normative engineering interpretation has been established. Verdict: 证据不足."
+            )
+            results.append(EvidenceItem(
+                evidence_id=f"C{len(results)+1}", scope=unit.scope,source_type='BUG_SPEC_CANDIDATE',
+                score=float(row['rank_score']),content=content,document_id=unit.document_id,
+                file_name=unit.file_name,content_id=unit.content_id,
+                specification_code=unit.spec_code,specification_version=unit.version_label,
+                section_id=unit.section_id,page_number=unit.page_number,
+                metadata={'non_authoritative_candidate':True,'status':'UNREVIEWED',
+                          'issue_key':issue_key,'mapping_id':row['mapping_id'],
+                          'candidate_id':row['id'],'verdict':'证据不足',
+                          'evidence_role':'PRIMARY_CONTENT','spec_text_hash':unit.text_hash},
+            ))
+        return results
+
     def _content_relation_search(
         self, scopes: Iterable[str], *, spec_codes: tuple[str, ...] = (),
     ) -> list[EvidenceItem]:
-        """Read bounded, provenance-linked requirement relations from v7 SQL.
+        """Supply ONLY audited, current, primary-body, intact two-ended edges.
 
-        Never assert an unreviewed edge as an approved engineering dependency;
-        each returned item carries both exact source spans and version identities.
+        Unreviewed proposals remain available in the operator review queue, NOT
+        in model context.  The caller can discover configured engineering scopes
+        without hard-coded 21MM/24MM restrictions.
         """
-        result: list[EvidenceItem] = []
+        import hashlib
+
+        from app.engineering_intelligence.requirements import normalize_text
+
         if not spec_codes:
-            return result  # no broad, irrelevant v7 graph fanout
+            return []  # explicitly bounded graph neighborhoods only
+        primary_source = PrimarySpecificationDocumentPolicy.sql_primary_predicate("sd")
+        primary_target = PrimarySpecificationDocumentPolicy.sql_primary_predicate("td")
+        result: list[EvidenceItem] = []
         for scope in scopes:
-            if scope not in {"21MM", "24MM"}:
+            if scope not in self.postgres_profiles or scope.upper() in {"QABUG", "RAG_QABUG"}:
                 continue
             with self._connect(scope) as conn, conn.cursor() as cur:
-                cur.execute("SELECT to_regclass('public.ei_content_relations')")
-                if not (cur.fetchone() or {}).get('to_regclass'):
+                cur.execute("""SELECT to_regclass('public.ei_content_relations') AS relation_table,
+                    to_regprocedure('dic_review.apply_content_relation_review(bigint,text,text,text,text,text,text)')
+                    AS authenticated_review_authority,
+                    COALESCE((SELECT p.prosecdef
+                           AND 'search_path=pg_catalog'=ANY(p.proconfig)
+                           AND NOT owner.rolcanlogin AND NOT owner.rolsuper
+                           AND NOT EXISTS (
+                             SELECT 1 FROM pg_catalog.aclexplode(COALESCE(p.proacl,
+                                       pg_catalog.acldefault('f',p.proowner))) acl
+                             WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE')
+                        FROM pg_catalog.pg_proc p
+                        JOIN pg_catalog.pg_roles owner ON owner.oid=p.proowner
+                        WHERE p.oid=to_regprocedure('dic_review.apply_content_relation_review(bigint,text,text,text,text,text,text)')),false)
+                    AS trusted_review_authority,
+                    (SELECT count(*) FROM pg_catalog.pg_trigger t
+                       JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
+                       JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+                       WHERE n.nspname='public'
+                         AND ((c.relname='ei_content_relations' AND t.tgname='dic_stage2_relation_guard')
+                              OR (c.relname='ei_relation_review_audit' AND t.tgname='dic_stage2_audit_guard'))
+                         AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgtype=31
+                         AND ((c.relname='ei_content_relations' AND
+                               t.tgfoid=to_regprocedure('dic_review.guard_relation_write()'))
+                              OR (c.relname='ei_relation_review_audit' AND
+                               t.tgfoid=to_regprocedure('dic_review.guard_audit_write()')))
+                         ) AS active_review_guards""")
+                exists = cur.fetchone()
+                if not exists:
                     continue
-                # Scope is a configured profile (not interpolated SQL), and the
-                # optional codes are parameterized. Current revisions only.
+                if isinstance(exists, dict):
+                    guarded = bool(exists.get("relation_table") and exists.get("authenticated_review_authority")
+                                   and exists.get("active_review_guards") == 2
+                                   and exists.get("trusted_review_authority") is True)
+                else:
+                    guarded = len(exists) >= 4 and bool(exists[0] and exists[1]
+                                                          and exists[2] is True and exists[3] == 2)
+                if not guarded:
+                    continue  # Fail closed until the v1.33 DB authority has been installed.
                 cur.execute(
-                    """
+                    f"""
                     SELECT rel.id, rel.relation_type, rel.score, rel.status, rel.rationale,
                            src.spec_code AS source_code, tgt.spec_code AS target_code,
                            su.document_id AS source_document, su.content_id AS source_content_id,
                            su.section_id AS source_section, su.page_number AS source_page,
                            su.start_offset AS source_start, su.end_offset AS source_end,
-                           su.raw_text AS source_text, sv.version_label AS source_version,
+                           su.raw_text AS source_text, su.text_hash AS source_hash,
+                           sc.content AS source_chunk, sv.version_label AS source_version,
+                           sd.file_name AS source_file_name,
                            tu.document_id AS target_document, tu.content_id AS target_content_id,
                            tu.section_id AS target_section, tu.page_number AS target_page,
                            tu.start_offset AS target_start, tu.end_offset AS target_end,
-                           tu.raw_text AS target_text, tv.version_label AS target_version
+                           tu.raw_text AS target_text, tu.text_hash AS target_hash,
+                           tc.content AS target_chunk, tv.version_label AS target_version,
+                           td.file_name AS target_file_name,
+                           audit.actor AS reviewed_by, audit.reason AS review_reason,
+                           audit.identity_provenance AS review_identity_provenance
                     FROM public.ei_content_relations rel
                     JOIN public.ei_requirement_units su ON su.id=rel.source_unit_id
                     JOIN public.ei_requirement_units tu ON tu.id=rel.target_unit_id
@@ -2907,54 +4517,123 @@ class EnterpriseRetriever:
                     JOIN public.specifications tgt ON tgt.id=tu.specification_id
                     JOIN public.specification_versions sv ON sv.id=su.version_id
                     JOIN public.specification_versions tv ON tv.id=tu.version_id
-                    WHERE rel.status IN ('CONFIRMED','REVIEW_REQUIRED')
+                    JOIN public.documents sd ON sd.document_id=su.document_id
+                    JOIN public.documents td ON td.document_id=tu.document_id
+                    JOIN public.contents sc ON sc.id=su.content_id AND sc.document_id=su.document_id
+                    JOIN public.contents tc ON tc.id=tu.content_id AND tc.document_id=tu.document_id
+                    JOIN LATERAL (
+                        SELECT a.actor, a.reason, a.new_status,
+                               to_jsonb(a)->>'identity_provenance' AS identity_provenance
+                        FROM public.ei_relation_review_audit a
+                        WHERE a.candidate_id=rel.id ORDER BY a.id DESC LIMIT 1
+                    ) audit ON audit.new_status='CONFIRMED' AND audit.identity_provenance='DB_SESSION_USER'
+                    WHERE rel.status='CONFIRMED'
+                      AND rel.reviewed_by=audit.actor
+                      AND src.project_code=%s AND tgt.project_code=%s
                       AND su.version_id=src.current_version_id
                       AND tu.version_id=tgt.current_version_id
-                      AND (%s::TEXT[] IS NULL OR src.spec_code=ANY(%s::TEXT[]) OR tgt.spec_code=ANY(%s::TEXT[]))
-                    ORDER BY CASE rel.status WHEN 'CONFIRMED' THEN 0 ELSE 1 END,
-                             rel.score DESC, rel.id
+                      AND sv.specification_id=su.specification_id
+                      AND tv.specification_id=tu.specification_id
+                      AND sv.document_id=su.document_id
+                      AND tv.document_id=tu.document_id
+                      AND {primary_source} AND {primary_target}
+                      AND (src.spec_code=ANY(%s::TEXT[]) OR tgt.spec_code=ANY(%s::TEXT[]))
+                    ORDER BY rel.score DESC, rel.id
                     LIMIT %s
                     """,
-                    (list(spec_codes) if spec_codes else None,
-                     list(spec_codes) if spec_codes else None,
-                     list(spec_codes) if spec_codes else None,
+                    (scope, scope, list(spec_codes), list(spec_codes),
                      min(30, max(self.top_k * 3, 8))),
                 )
                 for row in cur.fetchall():
+                    if (row["status"] != "CONFIRMED"
+                            or row.get("review_identity_provenance") != "DB_SESSION_USER"
+                            or not str(row["reviewed_by"] or "").strip()):
+                        LOGGER.warning("Content relation %s excluded: no valid confirmation", row["id"])
+                        continue
+                    # Independent runtime verification in addition to primary
+                    # SQL predicates: the answer must cite the original spans.
+                    valid = True
+                    for side in ("source", "target"):
+                        literal = str(row[f"{side}_text"] or "")
+                        original = str(row[f"{side}_chunk"] or "")
+                        left, right = int(row[f"{side}_start"]), int(row[f"{side}_end"])
+                        expected_hash = str(row[f"{side}_hash"] or "").strip()
+                        if (not (0 <= left < right <= len(original)) or
+                                original[left:right] != literal or
+                                hashlib.sha256(normalize_text(literal).encode("utf-8")).hexdigest() != expected_hash):
+                            LOGGER.warning("Content relation %s excluded: %s evidence drift", row["id"], side)
+                            valid = False
+                            break
+                    if not valid:
+                        continue
+                    # A graph edge labelled REFERENCES_SECTION must actually
+                    # contain a same-clause source-exact reference to the
+                    # currently selected target spec and section. Human audit
+                    # cannot turn a mismatched anchor into engineering fact.
+                    from app.engineering_intelligence.relations import find_reference_anchor
+                    reference_anchor = None
+                    if row["relation_type"] == "REFERENCES_SECTION":
+                        reference_anchor = find_reference_anchor(
+                            str(row["source_text"]), str(row["target_code"]),
+                            str(row["target_section"]),
+                        )
+                        if reference_anchor is None:
+                            LOGGER.warning("Content relation %s excluded: invalid explicit section anchor", row["id"])
+                            continue
                     md = {
-                        'status': row['status'], 'relation_type': row['relation_type'],
-                        'source': {
-                            'document_id': row['source_document'], 'content_id': row['source_content_id'],
-                            'version': row['source_version'], 'section_id': row['source_section'],
-                            'page_number': row['source_page'], 'start_offset': row['source_start'],
-                            'end_offset': row['source_end'],
+                        "status": "CONFIRMED", "relation_type": row["relation_type"],
+                        "evidence_role": "PRIMARY_CONTENT",
+                        "interpretation_limit": "Reference only; dependency/impact not proven by this edge",
+                        "reference_anchor": (
+                            {"raw_text": reference_anchor.raw_text,
+                             "start_offset": reference_anchor.start_offset,
+                             "end_offset": reference_anchor.end_offset}
+                            if reference_anchor else None
+                        ),
+                        "reviewed_by": row["reviewed_by"], "review_reason": row["review_reason"],
+                        "source": {
+                            "document_id": row["source_document"], "content_id": row["source_content_id"],
+                            "file_name": row["source_file_name"], "version": row["source_version"],
+                            "section_id": row["source_section"], "page_number": row["source_page"],
+                            "start_offset": row["source_start"], "end_offset": row["source_end"],
+                            "text_hash": str(row["source_hash"]).strip(),
                         },
-                        'target': {
-                            'document_id': row['target_document'], 'content_id': row['target_content_id'],
-                            'version': row['target_version'], 'section_id': row['target_section'],
-                            'page_number': row['target_page'], 'start_offset': row['target_start'],
-                            'end_offset': row['target_end'],
+                        "target": {
+                            "document_id": row["target_document"], "content_id": row["target_content_id"],
+                            "file_name": row["target_file_name"], "version": row["target_version"],
+                            "section_id": row["target_section"], "page_number": row["target_page"],
+                            "start_offset": row["target_start"], "end_offset": row["target_end"],
+                            "text_hash": str(row["target_hash"]).strip(),
                         },
                     }
-                    label = "CONFIRMED" if row['status'] == 'CONFIRMED' else "UNREVIEWED CANDIDATE - NOT VERIFIED"
-                    text = (
-                        f"[{label}] {row['source_code']} v{row['source_version']} "
+                    # Prompt-context bounded display; exact entire original
+                    # remains in the immutable SQL source and review workflow.
+                    def excerpt(value: str) -> str:
+                        return value if len(value) <= 1800 else value[:1800] + " [TRUNCATED — consult source offsets]"
+
+                    content = (
+                        f"[HUMAN REVIEWED · CONFIRMED] {row['source_code']} v{row['source_version']} "
                         f"§{row['source_section']} → {row['target_code']} v{row['target_version']} "
                         f"§{row['target_section']} ({row['relation_type']})\n"
-                        f"Source verbatim: {str(row['source_text'])[:1800]}\n"
-                        f"Target verbatim: {str(row['target_text'])[:1800]}\n"
-                        f"Basis: {row['rationale']}"
+                        f"Source verbatim: {excerpt(str(row['source_text']))}\n"
+                        f"Target verbatim: {excerpt(str(row['target_text']))}\n"
+                        f"Extraction basis: {row['rationale']}\n"
+                        f"Reference anchor: {reference_anchor.raw_text if reference_anchor else 'not extracted'}\n"
+                        "Engineering interpretation: an explicit section reference alone does NOT prove "
+                        "functional dependency, causality, conflict, or change impact.\n"
+                        f"Review reason: {row['review_reason']}"
                     )
                     result.append(EvidenceItem(
-                        evidence_id='', scope=scope, source_type='CONTENT_RELATION',
-                        content=text, score=float(row['score']) if row['status']=='CONFIRMED' else 0.25,
-                        content_id=int(row['source_content_id']),
-                        document_id=str(row['source_document']),
-                        specification_code=str(row['source_code'] or ''),
-                        specification_version=str(row['source_version'] or ''),
-                        section_id=str(row['source_section'] or ''),
-                        page_number=row['source_page'],
-                        relation_id=int(row['id']), metadata=md,
+                        evidence_id="", scope=scope, source_type="CONTENT_RELATION",
+                        content=content, score=float(row["score"]),
+                        content_id=int(row["source_content_id"]),
+                        document_id=str(row["source_document"]),
+                        file_name=str(row["source_file_name"] or ""),
+                        specification_code=str(row["source_code"] or ""),
+                        specification_version=str(row["source_version"] or ""),
+                        section_id=str(row["source_section"] or ""),
+                        page_number=row["source_page"],
+                        relation_id=int(row["id"]), metadata=md,
                     ))
         return result
 

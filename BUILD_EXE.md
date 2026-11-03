@@ -1,6 +1,6 @@
-# Source-release packaging notice (v1.28)
+# Source-release packaging notice (v1.52)
 
-The legacy Windows EXE build notes below belong to the earlier v1.03 desktop-only build. The included build_exe.ps1 now fails fast to avoid producing a misleading standalone v1.28 EXE. **They do not build or verify the v1.08 dual-process/watchdog deployment.** v1.08 GUI auto-start uses `.venv\Scripts\python.exe -m app.server` when running source. When packaging a frozen desktop EXE, you must also build/package a separate `DocumentIntelligenceBackend.exe`; the GUI deliberately refuses to simulate successful auto-start if that companion does not exist. Validate this separately on Windows before claiming production EXE support.
+The legacy Windows EXE build notes below belong to the earlier v1.03 desktop-only build. The included build_exe.ps1 now fails fast to avoid producing a misleading standalone v1.52 EXE. **They do not build or verify the v1.08 dual-process/watchdog deployment.** v1.08 GUI auto-start uses `.venv\Scripts\python.exe -m app.server` when running source. When packaging a frozen desktop EXE, you must also build/package a separate `DocumentIntelligenceBackend.exe`; the GUI deliberately refuses to simulate successful auto-start if that companion does not exist. Validate this separately on Windows before claiming production EXE support.
 
 ---
 

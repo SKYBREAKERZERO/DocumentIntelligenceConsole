@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 
 from app.ai.rag_service import EnterpriseRAGService
+from app.ai.request_safety import MAX_REQUEST_BYTES, UnsafeRequest, check_request
 
 
 class OpenAICompatibleServer:
@@ -95,16 +96,24 @@ class OpenAICompatibleServer:
                 if not self._auth_ok():
                     self._send_json(401, {"error": {"message": "Unauthorized"}})
                     return
+                # A missing, oversized or malformed length is rejected before
+                # reading the socket or allocating model/database resources.
                 try:
-                    length = int(self.headers.get("Content-Length", "0"))
+                    length = int(self.headers.get("Content-Length", "-1"))
+                except (TypeError, ValueError):
+                    length = -1
+                if length < 0 or length > MAX_REQUEST_BYTES:
+                    self._send_json(413, {"error": {"message": "Invalid or oversized request"}})
+                    return
+                try:
                     body = json.loads(self.rfile.read(length).decode("utf-8"))
-                    model = str(body.get("model") or "")
-                    messages = [
-                        {"role": str(item.get("role") or "user"), "content": str(item.get("content") or "")}
-                        for item in (body.get("messages") or [])
-                        if isinstance(item, dict)
-                    ]
-                    scope = str(body.get("scope") or "AUTO")
+                    model, messages, scope = check_request(
+                        body, allowed_models=outer.model_provider(),
+                    )
+                except (ValueError, UnicodeError, UnsafeRequest):
+                    self._send_json(400, {"error": {"message": "Invalid chat request"}})
+                    return
+                try:
                     service = outer.service_factory()
                     if body.get("stream"):
                         self.send_response(200)
@@ -154,13 +163,24 @@ class OpenAICompatibleServer:
                                 "intents": list(retrieval.intents),
                                 "evidence_count": len(retrieval.evidence),
                                 "evidence_strength": retrieval.evidence_strength,
+                                "candidate_suggestions": [
+                                    {
+                                        "id": x.evidence_id, "source_type": x.source_type,
+                                        "spec_code": x.specification_code,
+                                        "spec_version": x.specification_version,
+                                        "section_id": x.section_id, "page_number": x.page_number,
+                                        "score": x.score, "display_text": x.content,
+                                        "status": "UNREVIEWED", "verdict": "证据不足",
+                                    } for x in retrieval.candidate_suggestions
+                                ],
                                 "conflicts": list(retrieval.conflicts),
                                 "warnings": list(retrieval.warnings),
                             },
                         },
                     )
-                except Exception as exc:
-                    self._send_json(500, {"error": {"message": str(exc), "type": type(exc).__name__}})
+                except Exception:
+                    # Never leak SQL DSNs, file paths or model runtime details.
+                    self._send_json(500, {"error": {"message": "Internal enterprise inference error"}})
 
         self._server = ThreadingHTTPServer((self.host, self.port), Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, name="openai-rag-api", daemon=True)

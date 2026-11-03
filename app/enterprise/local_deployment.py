@@ -199,6 +199,30 @@ def lan_share_status(config_dir: Path | None = None) -> str:
     return f"已登记共享: http://{ip}:{port} （请从另一台电脑测试；不保证 Wi-Fi 无设备隔离）"
 
 
+def current_lan_ipv4() -> str:
+    """Best-effort current outbound LAN IPv4; never changes network state."""
+    import socket
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 9))
+        value = str(probe.getsockname()[0])
+        return "" if value.startswith("127.") or value.startswith("169.254.") else value
+    except OSError:
+        return ""
+    finally:
+        probe.close()
+
+
+def webui_access_addresses(port: int = 3000, config_dir: Path | None = None) -> str:
+    """Human-facing local and peer-device URLs for the administration Tool."""
+    share = read_lan_share(config_dir)
+    lan_ip = current_lan_ipv4() or str(share.get("ip") or "")
+    peer = f"http://{lan_ip}:{port}" if lan_ip else "未检测到可用的 Wi-Fi 局域网 IPv4"
+    enabled = bool(share and str(share.get("ip") or "") == lan_ip and int(share.get("port") or port) == port)
+    state = "已配置共享" if enabled else "尚未确认共享，请点击‘一键配置当前 Wi-Fi’"
+    return f"本机访问：http://127.0.0.1:{port}\n其他电脑/手机访问：{peer}（{state}）"
+
+
 def request_lan_configuration(project_root: Path, action: str, port: int = 3000) -> None:
     """Raise a UAC prompt for an explicit GUI button action only.
 

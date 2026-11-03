@@ -1,0 +1,54 @@
+{
+  "file_name": "990301_SYNTHETIC_Touchscreen_Ver1.00.pdf",
+  "file_type": "PDF",
+  "chapters": [
+    {
+      "id": "4",
+      "title_en": "Touchscreen",
+      "page_number": 2
+    }
+  ],
+  "sections": [
+    {
+      "id": "4.1",
+      "chapter_id": "4",
+      "title_en": "Approved glove input",
+      "page_number": 2
+    },
+    {
+      "id": "4.2",
+      "chapter_id": "4",
+      "title_en": "Driving restriction",
+      "page_number": 3
+    }
+  ],
+  "contents": [
+    {
+      "chapter_id": "4",
+      "section_id": "4.1",
+      "page_number": 2,
+      "text": "With approved gloves, a touchscreen long press between 800 ms and 1500 ms shall be accepted. Any shorter touch shall be ignored.",
+      "chunk_index": 0,
+      "token_count": 22
+    },
+    {
+      "chapter_id": "4",
+      "section_id": "4.2",
+      "page_number": 3,
+      "text": "While the vehicle is moving, video editing shall be disabled. This restriction shall not disable the audio volume control.",
+      "chunk_index": 0,
+      "token_count": 19
+    }
+  ],
+  "metadata": {
+    "project_code": "21MM",
+    "project_name": "Synthetic Acceptance 21MM",
+    "project_assignment_source": "USER_SELECTED",
+    "region_scope": "JP",
+    "document_role": "SPEC_BODY",
+    "artifact_type": "SPEC_BODY",
+    "acceptance_fixture": "SYNTHETIC_ONLY",
+    "synthetic_suite": "typical-enterprise-v1",
+    "specification_code_override": "990301"
+  }
+}

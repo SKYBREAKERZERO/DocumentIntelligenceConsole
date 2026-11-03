@@ -2,7 +2,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_MODULE = (ROOT / "app/enterprise/data_module.py").read_text(encoding="utf-8")
-QSYNC = (ROOT / "app/qabug/qdrant_sync.py").read_text(encoding="utf-8")
+QSYNC = (ROOT / "app/qabug/streaming_sync.py").read_text(encoding="utf-8")
 ADAPTER = (ROOT / "app/qabug/sync_adapter.py").read_text(encoding="utf-8")
 SCHEMA = (ROOT / "app/qabug/schema_manager.py").read_text(encoding="utf-8")
 
@@ -44,11 +44,20 @@ def test_qabug_sync_adapter_uses_only_qabug_authoritative_tables():
 def test_incremental_qabug_sync_repairs_missing_live_qdrant_points():
     # A SQL row marked COMPLETED must still be re-embedded/upserted if the live
     # Qdrant point is gone, stale, or carries a mismatched fingerprint.
-    assert "qdrant_by_id" in QSYNC
+    assert "by_id" in QSYNC
     assert "payload is None" in QSYNC
-    assert 'payload.get("content_hash")' in QSYNC
-    assert 'payload.get("index_hash")' in QSYNC
-    assert "all_rows" in QSYNC
+    assert '("content_hash","index_hash")' in QSYNC
+    from app.qabug.streaming_sync import needs_sync,make_payload
+    row={"chunk_id":1,"content":"source","content_hash":"a","index_hash":"b",
+         "embedding_status":"COMPLETED","embedded_content_hash":"a","embedding_model":"m","embedding_version":"v"}
+    payload=make_payload(row,"m","v")
+    assert not needs_sync(row,payload,"m","v")
+    assert needs_sync(row,None,"m","v")
+    for key in ("content_hash","index_hash","content"):
+        assert needs_sync(row,{**payload,key:"corrupt"},"m","v")
+    assert "all_rows" not in QSYNC
+    assert "scroll_all_points" not in QSYNC
+    assert "LIMIT %s" in QSYNC
 
 
 def test_qabug_schema_v2_contains_sync_audit_table():

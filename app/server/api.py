@@ -11,10 +11,12 @@ from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
 from app.ai.retrieval import EvidenceItem, RetrievalResult
+from app.ai.testing_workflow import TestingWorkflow
 from app.server.runtime import PersistentRAGRuntime
 from app.server.resilience import AdmissionController
 
@@ -38,7 +40,7 @@ def configured_chat_limit() -> int:
 
 class CompletionInput(BaseModel):
     model: str
-    messages: list[dict[str, Any]] = Field(min_length=1, max_length=40)
+    messages: list[dict[str, Any]] = Field(min_length=1)
     stream: bool = False
     scope: str = "AUTO"
 
@@ -49,6 +51,13 @@ class RetrievalInput(BaseModel):
     operation: str = "spec_lookup"
 
 
+class AssessmentInput(BaseModel):
+    scope: str
+    specification_code: str = Field(min_length=1,max_length=8)
+    context: dict[str,str] = Field(max_length=4)
+    observations: dict[str,Any] = Field(max_length=32)
+
+
 def serialize_evidence(result: RetrievalResult) -> dict[str, Any]:
     return {
         "request_id": result.request_id,
@@ -57,25 +66,40 @@ def serialize_evidence(result: RetrievalResult) -> dict[str, Any]:
         "scopes": list(result.resolved_scopes),
         "strength": result.evidence_strength,
         "warnings": list(result.warnings),
+        **({"workflow":result.workflow} if result.workflow else {}),
         "evidence": [
             {
                 "id": e.evidence_id, "scope": e.scope, "type": e.source_type,
                 "citation": e.citation_label, "content": e.content,
                 "specification_code": e.specification_code, "version": e.specification_version,
-                "section_id": e.section_id, "metadata": e.metadata,
+                "content_id": e.content_id, "document_id": e.document_id, "file_name": e.file_name,
+                "section_id": e.section_id, "page_number": e.page_number,
+                "metadata": e.metadata,
             }
             for e in result.evidence
         ],
     }
 
 
-def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: int | None = None) -> FastAPI:
+def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: int | None = None, ragflow_compat: bool | None = None) -> FastAPI:
     if len(token) < 32:
         raise ValueError("API token must be at least 32 characters")
     app = FastAPI(title="Document Intelligence Local RAG API", version="1.20", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.runtime = runtime
     admissions = AdmissionController(max_active_chats if max_active_chats is not None else configured_chat_limit())
+    factual_admissions = AdmissionController(2)
     app.state.chat_admissions = admissions
+    app.state.factual_admissions = factual_admissions
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request: Request, exc: RequestValidationError):
+        # Validation errors may contain the entire input conversation. Return
+        # only field diagnostics, never echo private ticket/document history.
+        detail = [{"loc": list(e.get("loc", ())), "type": e.get("type"),
+                   "msg": e.get("msg")} for e in exc.errors()]
+        return JSONResponse(status_code=422, content={
+            "error": {"message": "请求格式不正确，请检查消息内容。", "type": "invalid_request_error"},
+            "detail": detail})
 
     @app.middleware("http")
     async def secure_request(request: Request, call_next: Callable):
@@ -91,12 +115,36 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
             return JSONResponse(status_code=400, content={"detail": "Invalid content length"})
         if content_length < 0 or content_length > MAX_BODY:
             return JSONResponse(status_code=413, content={"detail": "Request too large"})
+        if request.url.path.startswith(("/compat/ragflow/", "/api/v1/skills/", "/api/v1/testing/")):
+            # Bound actual bytes, including a chunked request without Content-Length.
+            parts, size = [], 0
+            async for part in request.stream():
+                size += len(part)
+                if size > MAX_BODY:
+                    return JSONResponse(status_code=413, content={"detail": "Request too large"})
+                parts.append(part)
+            request._body = b"".join(parts)
         return await call_next(request)
 
     def require_auth(authorization: str | None = Header(default=None)) -> None:
         supplied = authorization or ""
         if not hmac.compare_digest(supplied.encode(), ("Bearer " + token).encode()):
             raise HTTPException(status_code=401, detail="Authentication required")
+
+    @app.post("/api/v1/testing/assess")
+    def assess(body: AssessmentInput, _: None = Depends(require_auth)):
+        if body.scope not in {"21MM","24MM"}:raise HTTPException(400,"Explicit engineering scope required")
+        lease=factual_admissions.acquire()
+        if lease is None:raise HTTPException(429,"Local retrieval busy",headers={"Retry-After":"3"})
+        try:
+            from app.ai.conformance import ConformanceService
+            from app.ai.retrieval_deadline import retrieval_budget
+            with retrieval_budget(25):
+                result,items=ConformanceService(runtime.get_service().retriever).assess(body.scope,body.specification_code,body.context,body.observations)
+            return {"assessment":result,"evidence":serialize_evidence(RetrievalResult(evidence=items,resolved_scopes=(body.scope,),route="CONFORMANCE_CHECK"))["evidence"]}
+        except Exception:
+            raise HTTPException(503,"Local configured checks unavailable") from None
+        finally:lease.release()
 
     @app.get("/api/v1/health")
     def health(_: None = Depends(require_auth)):
@@ -116,7 +164,36 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
     @app.get("/api/v1/runtime/metrics")
     def runtime_metrics(_: None = Depends(require_auth)):
         """Authenticated, no source data or credentials; metrics reset per process."""
-        return {"mode": "LOCAL_ONLY", "chat": admissions.snapshot()}
+        return {"mode": "LOCAL_ONLY", "chat": admissions.snapshot(), "factual": factual_admissions.snapshot()}
+
+    @app.get("/api/v1/skills")
+    def skills(_: None = Depends(require_auth)):
+        from app.skills.catalog import list_skills
+        return {"skills": list(list_skills()), "execution": "OFFLINE_SNAPSHOT_ONLY", "database_write": False}
+
+    @app.post("/api/v1/skills/{skill_name}/evaluate")
+    def evaluate_skill(skill_name: str, payload: dict[str, Any], _: None = Depends(require_auth)):
+        from app.skills.executor import execute_skill, SkillInputError
+        lease = factual_admissions.acquire()
+        if lease is None:
+            raise HTTPException(429, "Skill evaluation busy", headers={"Retry-After": "3"})
+        try:
+            result = execute_skill(skill_name, payload)
+        except (SkillInputError, ValueError, KeyError, TypeError):
+            lease.release(failed=True)
+            raise HTTPException(400, "Invalid Skill or snapshot; consult the local Skill input contract") from None
+        except Exception:
+            lease.release(failed=True)
+            raise HTTPException(503, "Skill evaluation unavailable") from None
+        else:
+            lease.release()
+            return result
+
+    @app.get("/api/v1/operations/receipts")
+    def ingestion_receipts(limit: int = Query(20, ge=1, le=100), _: None = Depends(require_auth)):
+        from app.enterprise.core_operations import recent_receipts
+        return {"items": recent_receipts(runtime.config_dir / "ingestion_runs", limit),
+                "policy": "LOCAL_ONLY", "running_state": "UNCONFIRMED_UNTIL_OPERATOR_CHECK"}
 
     @app.get("/api/v1/health/ready")
     def readiness(_: None = Depends(require_auth)):
@@ -157,8 +234,12 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
             )
 
         operations = {
+            "testing_check": lambda: TestingWorkflow(retriever).run(body.question,scope=body.scope),
+            "semantic": lambda: retriever.retrieve_qdrant_only(body.question, scope=body.scope, current_scope=""),
             "spec_catalog": lambda: retriever.retrieve_spec_catalog(body.question, scope=body.scope, current_scope=""),
             "spec_lookup": lambda: retriever.retrieve_spec_lookup(body.question, scope=body.scope, current_scope=""),
+            "spec_outline": lambda: retriever.retrieve_spec_outline(body.question, scope=body.scope, current_scope=""),
+            "spec_version_facts": lambda: retriever.retrieve_spec_version_facts(body.question, scope=body.scope, current_scope=""),
             "qa_bug": lambda: retriever.retrieve_issue_register(body.question, scope="QABUG", current_scope="", statistics=False),
             "qa_bug_statistics": lambda: retriever.retrieve_issue_register(body.question, scope="QABUG", current_scope="", statistics=True),
             "version_history": lambda: governed_tool("version_search"),
@@ -167,6 +248,20 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
         }
         if body.operation not in operations:
             raise HTTPException(status_code=400, detail="Unsupported read-only operation")
+        if body.operation in {"semantic","testing_check"}:
+            if body.operation == "semantic" and body.scope not in {"21MM", "24MM", "COMMON"}:
+                raise HTTPException(400, "Semantic diagnostics requires an explicit specification scope; use qa_bug for issue retrieval")
+            lease = factual_admissions.acquire()
+            if lease is None:
+                raise HTTPException(429, "Local retrieval busy", headers={"Retry-After": "3"})
+            try:
+                result = operations[body.operation]()
+            except Exception:
+                lease.release(failed=True)
+                raise HTTPException(503, "Local retrieval unavailable") from None
+            else:
+                lease.release()
+                return serialize_evidence(result)
         if body.operation in {"qa_bug", "qa_bug_statistics"} and body.scope not in {"AUTO", "QABUG", "QA/BUG", "ALL"}:
             raise HTTPException(status_code=400, detail="QA/BUG operation requires an explicit compatible scope")
         result = operations[body.operation]()
@@ -198,6 +293,37 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
             )
             return {"status":"OK", "scope":scope, "spec_code":spec_code,
                     "items":[dict(r) for r in cur.fetchall()]}
+
+    @app.get("/api/v1/intelligence/content/{scope}/{content_id}")
+    def engineering_content_location(
+        scope: str, content_id: int, _: None = Depends(require_auth),
+    ):
+        """Resolve an Open WebUI content_id to its exact stored location.
+
+        Authentication is intentionally retained: enterprise body text must not
+        become anonymously enumerable merely to make a convenient hyperlink.
+        """
+        if scope not in {"21MM", "24MM"} or content_id < 1:
+            raise HTTPException(400, "Explicit local scope/content_id required")
+        retriever = runtime.get_service().retriever
+        with retriever._connect(scope) as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.id AS content_id,c.section_id,c.page_number,c.content,
+                       d.document_id,d.file_name,sv.version_label,sp.spec_code,
+                       sp.canonical_name
+                FROM public.contents c
+                JOIN public.documents d ON d.document_id=c.document_id
+                JOIN public.specification_versions sv ON sv.document_id=c.document_id
+                JOIN public.specifications sp ON sp.id=sv.specification_id
+                WHERE c.id=%s AND sp.project_code=%s
+                LIMIT 1
+                """, (content_id, scope),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, "Content location not found in selected scope")
+            return {"status": "OK", "scope": scope, **dict(row)}
 
     @app.get("/api/v1/intelligence/relations")
     def engineering_content_relations(
@@ -290,8 +416,6 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
     def completions(body: CompletionInput, _: None = Depends(require_auth)):
         if body.model != MODEL_ID:
             raise HTTPException(status_code=400, detail="Use the local RAG model identifier")
-        if not runtime.preferred_model:
-            raise HTTPException(status_code=503, detail="Configure a local Ollama model in AI / RAG settings first")
         supported_scopes = {"AUTO", "21MM", "24MM", "COMMON", "QABUG", "QA/BUG", "ALL", "21MM + COMMON", "24MM + COMMON"}
         if body.scope not in supported_scopes:
             raise HTTPException(status_code=400, detail="Invalid knowledge scope")
@@ -312,7 +436,20 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
             messages.append({"role": role, "content": value})
         if not any(x["role"] == "user" for x in messages):
             raise HTTPException(status_code=400, detail="At least one user message required")
-        lease = admissions.acquire()
+        # The deterministic SQL lane stays responsive even while two slow
+        # Ollama generations occupy the model lane. Both remain bounded.
+        from app.ai.agent import FastIntentRouter
+        last_user = next((x['content'] for x in reversed(messages) if x['role']=='user'), '')
+        classification = FastIntentRouter.classify(
+            FastIntentRouter.contextualize(last_user, messages)
+        )
+        structured_routes = {'SPEC_CATALOG', 'SPEC_LOOKUP', 'SPEC_OUTLINE',
+                             'SPEC_CHAPTER_CONTENT', 'SPEC_SUMMARY', 'SPEC_VERSION_FACTS', 'SPEC_RELATIONS',
+                             'PRE_TICKET_CHECK','TICKET_SPEC_TRACE','CONFORMANCE_CHECK'}
+        if classification.route not in structured_routes and not runtime.preferred_model:
+            raise HTTPException(status_code=503, detail="Configure a local Ollama model in AI / RAG settings first")
+        selected_admissions = factual_admissions if classification.route in structured_routes else admissions
+        lease = selected_admissions.acquire()
         if lease is None:
             raise HTTPException(
                 status_code=429, detail="Local RAG is busy; retry shortly",
@@ -344,16 +481,22 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
                     "request_id": evidence.request_id, "route": evidence.route,
                     "scopes": list(evidence.resolved_scopes), "evidence_count": len(evidence.evidence),
                     "tools": list(evidence.tools), "warnings": list(evidence.warnings),
+                    **({"workflow":evidence.workflow,"strength":evidence.evidence_strength} if evidence.workflow else {}),
                 },
             }
 
         def emit():
+            captured=[]
             try:
                 yield "data: " + json.dumps({"id": cid, "object": "chat.completion.chunk", "created": created, "model": MODEL_ID, "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]}, ensure_ascii=False) + "\n\n"
-                for chunk in service.answer_stream(messages, model=model, scope=scope, current_scope=""):
+                callbacks={"on_retrieval":captured.append} if classification.route in {"PRE_TICKET_CHECK","TICKET_SPEC_TRACE","CONFORMANCE_CHECK"} else {}
+                for chunk in service.answer_stream(messages, model=model, scope=scope, current_scope="",**callbacks):
                     packet = {"id": cid, "object": "chat.completion.chunk", "created": created, "model": MODEL_ID, "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}]}
                     yield "data: " + json.dumps(packet, ensure_ascii=False) + "\n\n"
-                yield "data: " + json.dumps({"id": cid, "object": "chat.completion.chunk", "created": created, "model": MODEL_ID, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}) + "\n\n"
+                final={"id": cid, "object": "chat.completion.chunk", "created": created, "model": MODEL_ID, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+                if captured and captured[-1].workflow:
+                    final["rag"]={"route":captured[-1].route,"workflow":captured[-1].workflow}
+                yield "data: " + json.dumps(final) + "\n\n"
             except Exception:
                 lease.release(failed=True)
                 LOGGER.exception("Stream RAG request failed (id=%s)", cid)
@@ -374,4 +517,8 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
             background=BackgroundTask(lease.release),
         )
 
+    enabled = ragflow_compat if ragflow_compat is not None else os.environ.get("DIC_RAGFLOW_COMPAT", "0") == "1"
+    if enabled:
+        from app.server.ragflow_compat import install_adapter
+        install_adapter(app, runtime, require_auth, completions, CompletionInput, factual_admissions)
     return app

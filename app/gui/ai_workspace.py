@@ -823,6 +823,9 @@ class AIWorkspaceModule:
             "DIRECT_CHAT": "日常问答",
             "SPEC_CATALOG": "式样书目录 SQL",
             "SPEC_LOOKUP": "式样书精确 SQL",
+            "SPEC_OUTLINE": "本体目录 SQL",
+            "SPEC_CHAPTER_CONTENT": "正文原文 SQL",
+            "SPEC_VERSION_FACTS": "可信本体版本 SQL",
             "ISSUE_STATS": "QA/BUG 精确统计",
             "ISSUE_QUERY": "QA/BUG 企业检索",
             "ENGINEERING_AGENT": "工程 Agentic RAG",
@@ -831,7 +834,7 @@ class AIWorkspaceModule:
         if route == "DIRECT_CHAT":
             self.workspace_status_var.set("日常问答 · 已跳过企业知识库")
             self.runtime_metrics_var.set("DIRECT_CHAT · Qdrant 0 · SQL 0 · Planner 0")
-        elif route in {"SPEC_CATALOG", "SPEC_LOOKUP", "ISSUE_STATS"}:
+        elif route in {"SPEC_CATALOG", "SPEC_LOOKUP", "SPEC_OUTLINE", "SPEC_CHAPTER_CONTENT", "SPEC_VERSION_FACTS", "ISSUE_STATS"}:
             self.workspace_status_var.set("正在执行 PostgreSQL 权威结构化查询…")
             self.runtime_metrics_var.set(f"{route} · PostgreSQL structured")
         elif route == "ISSUE_QUERY":
@@ -1080,7 +1083,7 @@ class AIWorkspaceModule:
     def _show_retrieval(self, result: RetrievalResult) -> None:
         self._clear_evidence()
         self.current_evidence = list(result.evidence)
-        for item in result.evidence:
+        for item in (*result.evidence, *result.candidate_suggestions):
             iid = f"ev::{item.evidence_id}"
             score = "-" if item.score is None else f"{item.score:.3f}"
             issue_key = str(item.metadata.get("issue_key") or "").strip()
@@ -1106,7 +1109,8 @@ class AIWorkspaceModule:
         else:
             source = result.knowledge_source or "ENTERPRISE_AUTO"
             self.evidence_summary_var.set(
-                f"{len(result.evidence)} 条治理证据 · {source} · {scopes} · 强度 {result.evidence_strength}"
+                f"{len(result.evidence)} 条治理证据 · {len(result.candidate_suggestions)} 条未审核候选（仅展示，不进模型）"
+                f" · {source} · {scopes} · 强度 {result.evidence_strength}"
             )
             warnings = " | ".join(result.warnings)
             timings = [
@@ -1139,6 +1143,7 @@ class AIWorkspaceModule:
                 f"Tools: {', '.join(result.tools) or '-'}",
                 f"Entities: {', '.join(result.entities) or '-'}",
                 f"Evidence: {len(result.evidence)} · {result.evidence_strength}",
+                f"Display-only BUG/SPEC candidates: {len(result.candidate_suggestions)} (NOT provided to LLM)",
                 f"Planner: {result.planner_ms} ms",
                 f"SQL: {result.sql_ms} ms",
                 f"Semantic/Qdrant pipeline: {result.semantic_ms} ms",
@@ -1156,6 +1161,9 @@ class AIWorkspaceModule:
             route_status = {
                 "SPEC_CATALOG": "正在根据 PostgreSQL 式样书目录生成严谨回答…",
                 "SPEC_LOOKUP": "正在根据 PostgreSQL 精确规格元数据生成回答…",
+                "SPEC_OUTLINE": "正在读取真实本体 PDF 的登记章节…",
+                "SPEC_CHAPTER_CONTENT": "正在读取本体 PDF 的原文证据片段…",
+                "SPEC_VERSION_FACTS": "正在核验两份可信本体版本及差异记录…",
                 "ISSUE_STATS": "正在根据 QA/BUG 精确统计生成回答…",
                 "ISSUE_QUERY": "正在根据 QA/BUG 记录与治理证据生成回答…",
                 "ENGINEERING_AGENT": "正在根据企业工程证据生成回答…",
@@ -1166,7 +1174,7 @@ class AIWorkspaceModule:
         self.agent_trace.delete("1.0", END)
         self.agent_trace.insert("1.0", "\n".join(trace_lines))
         self._set_text_state(self.agent_trace, False)
-        if result.evidence:
+        if result.evidence or result.candidate_suggestions:
             first = self.evidence_tree.get_children()[0]
             self.evidence_tree.selection_set(first)
             self.evidence_tree.focus(first)

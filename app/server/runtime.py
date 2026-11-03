@@ -78,7 +78,9 @@ class PersistentRAGRuntime:
         try:
             import psycopg
             profile = self.profiles["COMMON"]
-            with psycopg.connect(**profile.dsn_kwargs(), password=self.password, connect_timeout=2) as conn:
+            params = profile.dsn_kwargs()
+            params.update(password=self.password, connect_timeout=2)
+            with psycopg.connect(**params) as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT 1")
                     states["PostgreSQL"] = "ONLINE" if cur.fetchone()[0] == 1 else "ERROR"
@@ -120,9 +122,9 @@ class PersistentRAGRuntime:
                     db_status = "DRIVER_MISSING"
                 else:
                     try:
-                        with psycopg.connect(
-                            **pg.dsn_kwargs(), password=self.password, connect_timeout=2
-                        ) as conn:
+                        params = pg.dsn_kwargs()
+                        params.update(password=self.password, connect_timeout=2)
+                        with psycopg.connect(**params) as conn:
                             with conn.cursor() as cur:
                                 cur.execute("BEGIN READ ONLY")
                                 cur.execute("SELECT 1")

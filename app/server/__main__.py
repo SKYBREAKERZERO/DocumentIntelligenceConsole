@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 
 # Strict local inference: block automatic model downloads from public hubs.
 # Pre-cache BGE-M3 locally before enabling this security policy.
@@ -20,8 +21,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Local-only DocumentIntelligence backend")
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--no-warmup", action="store_true")
+    parser.add_argument("--config-dir",type=Path,default=None,help="Explicit isolated/operator configuration directory")
     args = parser.parse_args()
-    config_dir = user_configuration_dir()
+    config_dir = args.config_dir.resolve() if args.config_dir else user_configuration_dir()
+    if args.config_dir is not None:
+        # An explicitly selected isolated configuration must not inherit a
+        # production CONFIG_FILE from the launching shell. Process-local only.
+        os.environ["CONFIG_FILE"]=str(config_dir/"config.yaml")
     settings = load_settings(config_dir)
     # Strictly refuse 0.0.0.0 and LAN bindings; LAN is a separate, audited phase.
     host = require_local_host(settings.api_host)

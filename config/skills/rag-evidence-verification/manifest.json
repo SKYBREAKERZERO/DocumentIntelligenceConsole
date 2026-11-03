@@ -1,0 +1,14 @@
+{
+  "name": "rag-evidence-verification",
+  "stage": "Stage 7",
+  "capability": "LITERAL_RELEASE_GATES_ONLY",
+  "input_keys": [
+    "answer",
+    "evidence"
+  ],
+  "auto_execution": false,
+  "runtime": "bounded_python_tool",
+  "network": "OFF",
+  "database_write": false,
+  "production_acceptance": "NOT_ASSESSED"
+}

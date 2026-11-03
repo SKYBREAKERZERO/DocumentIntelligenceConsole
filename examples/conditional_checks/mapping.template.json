@@ -1,0 +1,9 @@
+{
+  "issue_version_field": "software_version",
+  "software_version": "REPLACE_WITH_ACTUAL_SOFTWARE_VERSION",
+  "model": "REPLACE_WITH_ACTUAL_MODEL",
+  "destination": "REPLACE_WITH_ACTUAL_DESTINATION",
+  "spec_scope": "21MM",
+  "spec_code": "990101",
+  "spec_version_id": null
+}

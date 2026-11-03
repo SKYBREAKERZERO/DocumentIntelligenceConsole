@@ -1,0 +1,40 @@
+{
+  "schema": "synthetic-enterprise-suite-v1",
+  "synthetic_only": true,
+  "production_import_allowed": false,
+  "codes": [
+    "990101",
+    "990201",
+    "990301"
+  ],
+  "files": {
+    "990101_SYNTHETIC_Bluetooth_Audio_Ver1.00.pdf": "aba81268e48b4316b2d1c7ad0adb5c26a332af64df3da6a089e81bb8c5cb3b13",
+    "990101_SYNTHETIC_Bluetooth_Audio_Ver1.00.pdf.json": "9dbe82b9597a4005f43df4fe9ab2c3829d6dbc3683ccb23ee0ebcad6abc121f6",
+    "990101_SYNTHETIC_Bluetooth_Audio_Ver1.10.pdf": "65e6f61b37846c5504d9aa6042aad8f1aef093c8421c8998392254492fff2b6c",
+    "990101_SYNTHETIC_Bluetooth_Audio_Ver1.10.pdf.json": "96a55f6c7e1d6eb0aa615af3aa668ac18d531dc69e30fe610a331d02fdf58164",
+    "990201_SYNTHETIC_Audio_Routing_Ver2.00.pdf": "6e91fe1c47177f0a5e1d039d038d7ffeb2acbefa2bee543c0ae32edf32f8c418",
+    "990201_SYNTHETIC_Audio_Routing_Ver2.00.pdf.json": "e92d1b7c07f2379f37d53081435a813b5ccfbea836110419c8fcb4f5a224fff2",
+    "990301_SYNTHETIC_Touchscreen_Ver1.00.pdf": "a4e1f5368ace5edd3b8c99224db38f879c69e6e33893b4fe3d6483aa0f0dd9e3",
+    "990301_SYNTHETIC_Touchscreen_Ver1.00.pdf.json": "2f45c1a24192f01a4d904cebcbb7a674d539fc5e024901ebc2d43342097ff805",
+    "SYNTHETIC_QA.xlsx": "88e8b6684288c8c6b3f2f387b48be8f33555a29842177a58b192044ec14b86f4",
+    "SYNTHETIC_BUG.xlsx": "90c991302401fd24bc3d693795f23b33044402b31147fc136f600d9ea5486d13"
+  },
+  "expected_changes": {
+    "from": "1.00",
+    "to": "1.10",
+    "MODIFIED": [
+      "2.1"
+    ],
+    "ADDED": [
+      "2.3"
+    ],
+    "REMOVED": [
+      "2.4"
+    ]
+  },
+  "expected_reference": {
+    "source": "990101/2.5",
+    "target": "990201/3.1"
+  },
+  "expected_conformance": "UNDETERMINED: no approved applicability mapping"
+}

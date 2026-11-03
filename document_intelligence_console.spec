@@ -474,6 +474,14 @@ datas.append(
 # Deduplicate
 # ============================================================
 
+# The core home discovers these fixed Skill manifests during startup.
+# Include instruction metadata and synthetic examples in frozen desktop builds.
+for resource in ("config/skills", "examples/skills"):
+    folder = project_root / resource
+    if not folder.is_dir():
+        raise FileNotFoundError(f"Required core resource directory missing: {folder}")
+    datas.append((str(folder), resource))
+
 hiddenimports = sorted(set(hiddenimports))
 datas = deduplicate_sequence(datas)
 binaries = deduplicate_sequence(binaries)

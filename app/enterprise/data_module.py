@@ -2013,6 +2013,12 @@ class DataConsoleModule:
         } | {QABUG_COLLECTION}
         if not current_collection or current_collection in known_defaults:
             self.rag_sync_collection_var.set(default_collection)
+        if os.environ.get("DIC_CONSOLE_MODE", "core").lower() != "advanced" and hasattr(self.host, "ai_module"):
+            saved = self.host.ai_module.settings_store.load()
+            self.rag_sync_model_var.set(saved.embedding_model)
+            self.rag_sync_dimension_var.set(str(saved.vector_dimension))
+            if project.code != "QABUG":
+                self.rag_sync_collection_var.set(saved.collections[project.code])
         if project.code == "QABUG":
             self.rag_sync_source_var.set("public.qabug_current_chunks · QA/BUG CURRENT ONLY")
             self.rag_sync_status_var.set(
@@ -2232,6 +2238,9 @@ class DataConsoleModule:
         thread.start()
 
     def start_qdrant_sync(self, *, full_rebuild: bool) -> None:
+        if self.host.is_processing:
+            messagebox.showinfo("SQL → Qdrant", "文档入库仍在运行，请先等待完成或安全停止。", parent=self.root)
+            return
         if self.rag_sync_thread is not None and self.rag_sync_thread.is_alive():
             return
         if full_rebuild:

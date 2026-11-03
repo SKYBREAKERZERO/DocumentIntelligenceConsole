@@ -109,113 +109,72 @@ class QABugCurrentQdrantSyncService:
         )
         return manager.ensure_contract(repair_mismatched=repair_mismatched)
 
-    def _load_sql_fingerprints(self) -> list[dict[str, Any]]:
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT c.id AS content_id, c.qdrant_point_id, c.content_hash, c.index_hash,
-                       c.embedding_status, c.embedding_model, c.embedding_version
-                FROM public.qabug_chunks c
-                JOIN public.qabug_records r ON r.id=c.record_id
-                WHERE c.is_current AND r.is_current AND r.is_queryable
-                  AND LENGTH(BTRIM(c.content)) > 0
-                ORDER BY c.id
-                """
-            )
-            return [dict(row) for row in cur.fetchall()]
+    def _load_sql_fingerprints(self):
+        """Yield keyset-paged fingerprints; retain no corpus text or global maps."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT coalesce(max(id),0) AS ceiling FROM public.qabug_chunks")
+                ceiling=int(cur.fetchone()["ceiling"])
+                last=0
+                while last<ceiling:
+                    cur.execute("""SELECT c.id AS content_id,c.qdrant_point_id,c.content_hash,c.index_hash,
+                        c.embedding_status,c.embedded_content_hash,c.embedding_model,c.embedding_version
+                        FROM public.qabug_chunks c JOIN public.qabug_records r ON r.id=c.record_id
+                        WHERE c.is_current AND r.is_current AND r.is_queryable AND length(btrim(c.content))>0
+                          AND c.id>%s AND c.id<=%s ORDER BY c.id LIMIT 512""",(last,ceiling))
+                    page=[dict(row) for row in cur.fetchall()]
+                    if not page:break
+                    last=int(page[-1]["content_id"])
+                    yield from page
 
-    def preview(
-        self,
-        *,
-        progress: Callable[[dict[str, Any]], None] | None = None,
-        cancel_check: Callable[[], bool] | None = None,
-    ) -> QdrantSyncPlan:
-        def emit(stage: str, percent: float, message: str) -> None:
-            if progress:
-                progress({"stage": stage, "percent": percent, "message": message})
+    def preview(self,*,progress=None,cancel_check=None) -> QdrantSyncPlan:
+        from itertools import islice
+        from app.qabug.streaming_sync import needs_sync,ELIGIBLE
+        def check():
+            if cancel_check and cancel_check():raise QdrantSyncCancelled("QA/BUG preview cancelled")
+        check()
+        exists=self.qdrant.collection_exists(self.collection_name)
+        client=self.qdrant._client() if exists else None
+        q_count=self.qdrant.count_collection(self.collection_name) if exists else 0
+        new_ids=[];changed_ids=[];unchanged_ids=[];source_count=0
+        iterator=iter(self._load_sql_fingerprints())
+        try:
+            while True:
+                check();page=list(islice(iterator,512))
+                if not page:break
+                source_count+=len(page)
+                points=client.retrieve(self.collection_name,ids=[int(r["qdrant_point_id"]) for r in page],with_payload=True,with_vectors=False) if client else []
+                by_id={int(p.id):dict(p.payload or {}) for p in points}
+                for row in page:
+                    payload=by_id.get(int(row["qdrant_point_id"]))
+                    target=new_ids if payload is None else changed_ids if needs_sync(row,payload,self.embedding_model,self.embedding_version) else unchanged_ids
+                    target.append(int(row["content_id"]))
+                if progress:progress({"stage":"qabug_plan_sql","percent":35,"message":f"已检查 {source_count} 个 QA/BUG 片段"})
+        finally:
+            if hasattr(iterator,"close"):iterator.close()
+        stale_ids=[]
+        if exists:
+            offset=None;seen=set()
+            with self._connect() as conn,conn.cursor() as cur:
+                while True:
+                    check();page,next_offset=self.qdrant.scroll_page(self.collection_name,limit=512,offset=offset)
+                    numeric=[int(p["id"]) for p in page if str(p["id"]).isdigit() and int(p["id"])<=2**63-1]
+                    cur.execute(f"SELECT c.qdrant_point_id FROM public.qabug_chunks c JOIN public.qabug_records r ON r.id=c.record_id WHERE c.qdrant_point_id=ANY(%s) AND {ELIGIBLE}",(numeric,))
+                    eligible={str(r["qdrant_point_id"]) for r in cur.fetchall()}
+                    stale_ids.extend(p["id"] for p in page if str(p["id"]) not in eligible)
+                    if next_offset is None:break
+                    if repr(next_offset) in seen:raise RuntimeError("Repeated QA/BUG collection page")
+                    seen.add(repr(next_offset));offset=next_offset
+        with self._connect() as conn,conn.cursor() as cur:
+            cur.execute("SELECT count(*) AS n FROM public.qabug_embedding_state WHERE qdrant_collection=%s",(self.collection_name,))
+            state_count=int(cur.fetchone()["n"])
+        if progress:progress({"stage":"qabug_plan_done","percent":100,"message":"QA/BUG 分页核对完成"})
+        return QdrantSyncPlan(project_code="QABUG",database_name=self.postgres.database,collection_name=self.collection_name,
+            source_count=source_count,qdrant_count=q_count,state_count=state_count,new_ids=tuple(new_ids),changed_ids=tuple(changed_ids),
+            unchanged_ids=tuple(unchanged_ids),stale_ids=tuple(stale_ids),queued_delete_ids=(),drift_delta=q_count-source_count)
 
-        if cancel_check and cancel_check():
-            raise QdrantSyncCancelled("QA/BUG sync preview cancelled.")
-
-        emit("qabug_plan_sql", 15, "Scanning QA/BUG current SQL chunks…")
-        sql_rows = self._load_sql_fingerprints()
-        if cancel_check and cancel_check():
-            raise QdrantSyncCancelled("QA/BUG sync preview cancelled.")
-
-        emit("qabug_plan_qdrant", 45, "Scanning QA/BUG Qdrant points…")
-        q_rows = (
-            self.qdrant.scroll_all_points(self.collection_name)
-            if self.qdrant.collection_exists(self.collection_name)
-            else []
-        )
-        q_by_point = {int(row["id"]): dict(row.get("payload") or {}) for row in q_rows}
-
-        new_ids: list[int] = []
-        changed_ids: list[int] = []
-        unchanged_ids: list[int] = []
-        eligible_point_ids: set[int] = set()
-        for row in sql_rows:
-            if cancel_check and cancel_check():
-                raise QdrantSyncCancelled("QA/BUG sync preview cancelled.")
-            content_id = int(row["content_id"])
-            point_id = int(row["qdrant_point_id"])
-            eligible_point_ids.add(point_id)
-            payload = q_by_point.get(point_id)
-            if payload is None:
-                new_ids.append(content_id)
-                continue
-            q_hash = str(payload.get("content_hash") or "")
-            q_index_hash = str(payload.get("index_hash") or "")
-            q_model = str(payload.get("embedding_model") or "")
-            q_version = str(payload.get("embedding_version") or "")
-            if (
-                q_hash != str(row.get("content_hash") or "")
-                or q_index_hash != str(row.get("index_hash") or "")
-                or q_model != self.embedding_model
-                or q_version != self.embedding_version
-            ):
-                changed_ids.append(content_id)
-            else:
-                unchanged_ids.append(content_id)
-
-        stale_ids = sorted(set(q_by_point) - eligible_point_ids)
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS n FROM public.qabug_embedding_state")
-            state_count = int(cur.fetchone()["n"])
-
-        emit("qabug_plan_done", 100, "QA/BUG SQL ↔ Qdrant preview ready.")
-        return QdrantSyncPlan(
-            project_code="QABUG",
-            database_name=self.postgres.database,
-            collection_name=self.collection_name,
-            source_count=len(sql_rows),
-            qdrant_count=len(q_rows),
-            state_count=state_count,
-            new_ids=tuple(new_ids),
-            changed_ids=tuple(changed_ids),
-            unchanged_ids=tuple(unchanged_ids),
-            stale_ids=tuple(stale_ids),
-            queued_delete_ids=(),
-            drift_delta=len(q_rows) - len(sql_rows),
-            warnings=(),
-        )
-
-    def _reset_for_full_rebuild(self) -> None:
-        if self.qdrant.collection_exists(self.collection_name):
-            self.qdrant.delete_collection(self.collection_name)
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE public.qabug_chunks c
-                SET embedding_status='PENDING', embedded_content_hash=NULL,
-                    embedded_at=NULL, qdrant_collection=%s, updated_at=CURRENT_TIMESTAMP
-                FROM public.qabug_records r
-                WHERE r.id=c.record_id AND c.is_current AND r.is_current AND r.is_queryable
-                """,
-                (self.collection_name,),
-            )
-            cur.execute("DELETE FROM public.qabug_embedding_state")
-            conn.commit()
+    def _reset_for_full_rebuild(self):
+        raise RuntimeError("Use sync(full_rebuild=True); batch recalculation preserves the collection")
 
     def sync(
         self,
@@ -251,11 +210,8 @@ class QABugCurrentQdrantSyncService:
         try:
             if cancel_check and cancel_check():
                 raise QdrantSyncCancelled("QA/BUG sync cancelled before embedding.")
-            if full_rebuild:
-                if progress:
-                    progress({"stage": "qabug_rebuild", "percent": 8, "message": "Resetting QA/BUG derived vector index…"})
-                self._reset_for_full_rebuild()
-
+            # Full rebuild recalculates current points in batches without dropping
+            # the collection or hiding all already usable enterprise evidence.
             manager = QABugQdrantManager(
                 qdrant_service=self.qdrant,
                 collection_name=self.collection_name,
@@ -268,12 +224,23 @@ class QABugCurrentQdrantSyncService:
                     # cancellation is checked again immediately afterwards.
                     return
                 if progress:
-                    percent = 10 + (85 * done / max(1, total))
+                    percent = min(95, 10 + (85 * done / max(1, total)))
                     progress({
                         "stage": "qabug_embed",
                         "percent": percent,
-                        "message": f"QA/BUG embedding {done}/{total} · {key}",
+                        "message": f"QA/BUG 已处理 {done}/{total} · {key}",
                     })
+
+            def manager_checkpoint(event):
+                with self._connect() as db,db.cursor() as cur:
+                    if event["phase"]=="LOCK_ACQUIRED":
+                        cur.execute("""UPDATE public.qabug_qdrant_sync_runs SET status='INTERRUPTED',finished_at=now(),
+                            error_message='Previous process ended; completed batches retained'
+                            WHERE collection_name=%s AND id<>%s AND status='RUNNING'""",(self.collection_name,run_id))
+                    else:
+                        cur.execute("UPDATE public.qabug_qdrant_sync_runs SET upserted_count=%s,deleted_count=%s WHERE id=%s",
+                            (event["upserted"],event.get("deleted",0),run_id))
+                    db.commit()
 
             report = manager.sync_from_postgres(
                 postgres_profile=self.postgres,
@@ -283,6 +250,9 @@ class QABugCurrentQdrantSyncService:
                 batch_size=self.batch_size,
                 progress=manager_progress,
                 prune_stale=True,
+                cancel_check=cancel_check,
+                force_reembed=full_rebuild,
+                checkpoint=manager_checkpoint,
             )
             if cancel_check and cancel_check():
                 raise QdrantSyncCancelled("QA/BUG sync cancelled after current batch.")
@@ -299,23 +269,23 @@ class QABugCurrentQdrantSyncService:
                 cur.execute(
                     """
                     UPDATE public.qabug_qdrant_sync_runs
-                    SET status='READY', upserted_count=%s, deleted_count=%s,
+                    SET status=%s, upserted_count=%s, deleted_count=%s,
                         qdrant_after_count=%s, finished_at=CURRENT_TIMESTAMP
                     WHERE id=%s
                     """,
-                    (report.points_upserted, report.stale_points_deleted, final_count, run_id),
+                    (report.status, report.points_upserted, report.stale_points_deleted, final_count, run_id),
                 )
                 conn.commit()
             if progress:
-                progress({"stage": "qabug_done", "percent": 100, "message": "QA/BUG SQL → Qdrant sync complete."})
+                progress({"stage": "qabug_done", "percent": 100, "message": "QA/BUG 同步完成" if report.status=="READY" else "来源发生变化，已保存批次，请再次增量核对"})
             return QdrantSyncResult(
                 run_id=run_id,
                 mode=mode,
-                status="READY",
+                status=report.status,
                 plan=plan,
                 upserted_count=report.points_upserted,
                 deleted_count=report.stale_points_deleted,
-                failed_count=0,
+                failed_count=report.source_changed_count,
                 final_qdrant_count=final_count,
                 elapsed_seconds=elapsed,
                 warnings=report.warnings,

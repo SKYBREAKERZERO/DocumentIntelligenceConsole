@@ -1,4 +1,189 @@
+## v1.54 - Conversation intelligence and answerable-evidence phase 1 (2026-11-02)
+
+- Added a user-authored conversation state for the active QA/BUG ticket, specification, project, version, and source-to-target relation.
+- Added question frames that distinguish explaining a recorded ticket conclusion from performing a new current conformance judgment.
+- Added an answer-usability gate that removes UUID-dominated, header-only, and coordinate-only semantic chunks before model prompting.
+- Added explicit answer contracts so the model separates ticket facts, independently verified specification facts, and semantic candidates.
+- Expanded natural relation follow-ups such as "508和542有关" / "把那部分展开" without adding one-off document rules.
+- Added regression coverage for ticket/spec identity isolation, current-vs-recorded judgments, and noisy Excel evidence.
+
+## v1.54 - Multi-turn specification identity and CPU-only chapter evidence (2026-10-27)
+
+- Queries with introductory verbs and exact versioned PDF name now use PostgreSQL SPEC_LOOKUP (no Ollama).
+- Follow-up "按章节总结一下内容" / "总结一下" reuses only explicit PDF identity from earlier **user** messages (no assistant-generation identity inference).
+- New SPEC_CHAPTER_CONTENT read-only path supplies bounded PostgreSQL original-text excerpts with page and content IDs; clearly labels incomplete coverage and never promotes Cover Sheet.
+- Structured fact requests have their own bounded admission lane, avoiding busy responses caused by long Ollama chats.
+- Keeps 550/BT numeric identity unresolved; no PostgreSQL/Qdrant migration is performed.
+
 # Changelog
+
+## v1.53 — Safe body-document read path for unverified 550 identity (2026-10-27)
+
+- Actual 21MM registry audit: 550 Cover Sheet is spec_id=2/version_id=2 and v2.52 PDF is spec_id=3/version_id=3 with NULL spec_code; regional scope remains unresolved.
+- PostgreSQL-only BODY candidate query joins MAIN versions without asserting the user's numeric specification identity. Returns `SPEC_IDENTITY_CANDIDATE`, `LIMITED` evidence, the actual linked version ID, and source file/document IDs.
+- Candidate PDF chapters/sections can now be read directly by document ID, explicitly labeled as unapproved numeric identity. Cover Sheet is never admitted as technical chapters or another body version.
+- Read-only validation tool for Windows checks actual candidate/outline/version status rather than route only; API returns physical document identifiers. No database or Qdrant mutations; production status remains NO-GO.
+
+## v1.52 — PostgreSQL specification lookup repair (2026-10-27)
+
+- Fixed PostgreSQL `IndeterminateDatatype` in the MAIN SPEC_BODY lookup by explicitly typing nullable version parameters as `text` and spec-code arrays as `text[]`.
+- Version lookup failure no longer suppresses a separate read-only imported-file check; unresolved linkage is labeled as unverified, not a registered SPEC_BODY version.
+- Bare versioned filenames use the SQL-only identity route; no 4B model call required.
+- Unbound body files cannot be presented as certified TOC or historical version comparison.
+- Added Windows PowerShell 5.1 UTF-8 BOM validation script, real-record regression fixtures, and a read-only PostgreSQL linkage diagnostic. No production DB or Qdrant writes.
+- Real 21MM evidence supplied during diagnosis: `Bluetooth Audio function spec v2.52.pdf` exists in `documents`, but the trusted 550 MAIN/version relation is not yet independently demonstrated.
+
+
+## v1.51 — SQL-only specification factual answer paths (2026-10-27)
+
+- Eliminated Ollama-dependent refusal on document existence, 21MM/24MM catalog, registered source chapters and adjacent verified SPEC_BODY version inventories. Metadata queries now have a deterministic SQL-backed renderer and expose their true limits.
+- Exact filename/BT alias discovery, explicit version-label filtering, non-primary exclusions and separate detection of imported but unlinked PDF files.
+- Added controlled `/api/v1/retrieval` operations and local PowerShell smoke check. Fixed repeated `connect_timeout` causing false SQL health failures.
+- No data migrations/writes, no external calls and no auto-approval. Genuine customer PostgreSQL and PDF/Golden end-to-end verification remains pending (NO-GO).
+
+## v1.50 — safety-gated cross-domain Skill workflow & issue-originated retrieval (2026-10-26)
+
+- Added mandatory bounded read-only tool plans for historical specification, QA/BUG and engineering relation queries; reserve evidence across domains instead of losing relevant contexts to global Top-K ranking.
+- Added an optional second-pass lexical spec lookup based only on authoritative PostgreSQL issue symptom fields; never derive evidence from post-fix effect results, never infer issue-to-spec applicability or confirm semantic candidates.
+- Added safe whole-field ISSUE projection for local-model context limits and blocked unsupported reviewed dependency/conformance language. Implemented narrow ON/OFF numeric parameter anchoring checks.
+- Fixed issue-key number -> spec number false-positive. Added synthetic reproducible workflow profile evaluator, unit/negative tests and deployment restrictions.
+- **No new schema migration, index writes, third-party runtime dependencies or permission changes.** Real customer Golden, PostgreSQL 17, Qdrant and Windows GUI validation not done. Production NO-GO.
+
+## v1.49 — seven task-specific engineering Skills and bounded local runner (2026-10-26)
+
+- Added Stage 1/2/3/4/6/7 Skill instructions, fixed catalog, typed read-only offline Python adapters, seven synthetic demo inputs and negative contract tests.
+- Integrated `rag-evidence-verification` into the existing enterprise answer publication gate without allowing model-provided evidence IDs.
+- No network, dynamic Python/SQL, PostgreSQL/Qdrant updates or automatic approvals. Only the evidence Skill is live; other Skills remain manual offline previews.
+- Corrected the Windows fixed version numeric resource from the stale 1.47. Production status remains NO-GO pending real customer Golden and database validation.
+
+## v1.48 — enterprise literal claim anchors, non-exhaustive query gate and quality audit (2026-10-26)
+
+- Added a deterministic answer-release safeguard checking that version literals, engineering numbers and physical units are present in the **same cited admitted evidence**. Supports exact Decimal-based conversion for a bounded set of time/frequency/voltage/current units. Fails closed on unmatched literals; it does NOT prove applicability, negation, causality or semantic entailment.
+- Refuse open-ended requests that demand ALL requirements/conditions when only bounded Top-K engineering text search is available. Legacy context helper no longer clips partial requirement text.
+- Added an explicit synthetic regression set and CLI answer-gate evaluator. Its result is NOT a customer Golden Dataset or production signoff.
+- Retained PostgreSQL-backed SPEC_BODY and reviewed/unreviewed evidence separation. No database migration or index writes. Local tests only; real customer Golden, PG17, Qdrant, Windows and resource limits remain unvalidated. Production acceptance stays NO-GO.
+
+## v1.47 — evidence-backed enterprise answer release gates (2026-10-23)
+
+- Closed locally reproducible Dense payload provenance bypass with mandatory SQL truth hydration, document/revision identity and actual SHA-256 verification. Extended SQL exact and Sparse digest checks; fail closed on missing/stale legacy vector metadata.
+- Added post-generation, pre-stream enterprise citation-ID and uncited-paragraph gate. No invalid citations are released as partial SSE chunks. The gate is **syntactic**, not semantic claim entailment, and has not been validated on a real Golden Dataset.
+- Added PDF page/content ID/source-hash citation labels; refuse mid-clause truncation of engineering requirements and disclose omitted evidence. Added API request bounds/model allow-list and diagnostic redaction.
+- No schema migration or database/index writes. Offline tests only; live Postgres/Qdrant, Windows GUI, CPU performance and customer evidence remain unvalidated. Production acceptance: NO-GO.
+
+## v1.46 — Stage 4 local CPU reranker, bounded inference and latency benchmark (2026-10-23)
+
+- Optional local-directory CrossEncoder CPU ranking of SQL-verified SPEC_BODY RRF candidates only. No change to trusted relation, temporal, QA/BUG or user-visible unreviewed-candidate evidence boundaries. Ranking scores are not engineering confidence.
+- Spawn-isolated, single-slot CPU inference with hard deadline, input/batch/thread bounds, local-only loading, and exact RRF fallback on exceptions, timeout or invalid scores. No database migrations/index writes; no Windows frozen EXE or cross-platform hard memory cap certification.
+- Offline Golden replay benchmark records per-query measured Recall@K/Precision@K/MRR@K and p50/p95 CPU wall-clock latency (includes model cold start but excludes SQL/Qdrant/LLM runtime). Real customer corpus, on-device CrossEncoder weights, PG17/Qdrant integration and quality thresholds have NOT been validated.
+
+## v1.45 — Stage 4 BGE-M3 native Sparse sidecar and 3-way RRF (2026-10-23)
+
+- Added optional CPU FP32 FlagEmbedding BGE-M3 learned lexical token weights and a separate sparse-only Qdrant sidecar with named sparse vector; the existing unnamed Dense current index remains untouched. The bounded build CLI defaults to read-only preview; --write is an explicit Qdrant-sidecar operation only.
+- Online sparse lookup uses SQL-hydrated SPEC_BODY text and independently checks project, point/content ID, document, filename, version, spec code and authoritative content hash. Rejected/stale hits cannot raise ranking. Missing optional components retain the v1.44 two-way path.
+- Agent and direct hybrid paths support optional SQL/Dense/Sparse RRF; Golden evaluation distinguishes per-source and two-/three-way Recall@K, Precision@K, MRR@K. RRF remains ranking-only. Offline tests do not establish live Qdrant, PostgreSQL, Windows, CPU latency, original PDFs, or a neural reranker.
+
+## v1.44 — Stage 4 scoped SQL/Dense RRF and offline retrieval baseline (2026-10-23)
+
+- Replaced tool-order concatenation with identity-scoped, bounded Reciprocal Rank Fusion for SQL-exact and Qdrant Dense SPEC_BODY chunks in the Agent hybrid path. Cover sheets, missing source identities, QA/BUG and relationship/version candidates cannot be fused.
+- Conflicting SQL vs Dense original source text/content hashes cancel the Dense RRF vote, preserving the SQL copy. RRF score explicitly means *ranking only*, never relationship approval or compliance confidence.
+- Added Golden Dataset JSONL read-only evaluator for SQL/Dense/RRF Recall@K, Precision@K and MRR@K with opt-in thresholds and fail-closed invalid-input handling. No SQL migrations, Qdrant index changes, live database certification or Windows testing. BGE-M3 native Sparse and local Reranker remain pending.
+
+
+## v1.43 — Agent read-only temporal audit & PG17 runtime smoke (2026-10-23)
+
+- Integrated explicit relation ID + new target version ID temporal verification into the Agent, with an isolated original-question-only, project-bound, fail-closed READ ONLY snapshot. Untrusted LLM rewrites never choose identity or issue SQL. Exact temporal audit does not mix vector candidates or trigger broad adaptive recovery.
+- Evidence governance and prompts distinguish audited target mapping status from UNDETERMINED engineering relation validity, and incomplete audits stay low-grade diagnostics. No human approval inheritance, stale verdicts, or compliance/impact inference.
+- Added standalone opt-in PostgreSQL 17 runtime schema/project/restricted-role/column-write/owner-membership smoke preflight. Synthetic negative tests are not live PG acceptance. No migrations/DB writes/Qdrant modifications; Windows/real 508-to-550 PDF and performance pending.
+
+## v1.42 — read-only temporal relation continuity audit (2026-10-23)
+
+- Introduced explicit historical edge ID → later target SPEC_BODY version read-only audit with verified source/old/new requirement text, offsets and hashes, version identity/order, complete receipt count identity, unique READY version pair and existing deterministic/approved v7 requirement mapping.
+- Extractive target statuses are separated from engineering dependency validity, which remains UNDETERMINED in all outcomes. No carrying forward CONFIRMED or emitting automatic invalidation/stale claims; source-version effective-date alignment remains unestablished.
+- Added negative tests for Coversheets, fabricated/ambiguous mappings, mismatched version sequences, source drift, incomplete receipts and conflicting status/text. Supplied bounded CLI with strict project/database identity guard and no writes. No live PostgreSQL, Windows, customer PDF or Stage 4 acceptance claimed.
+
+## v1.41 — Body-version selection, full-source index receipt, filtered-adjacency safety (2026-10-23)
+
+- Fixed structural read models to choose the actual MAIN SPEC_BODY version when a historical current pointer references a Coversheet. Do not fallback to a stale indexed version and do not use REJECTED source/target spans for explicit citations.
+- Fixed false `ADJACENT_INDEXED_UNITS` under a chapter filter: only a DB-derived next-indexed-unit ID over the unfiltered document/version/content corpus can prove consecutive extracted units.
+- Added opt-in, fail-closed, read-only index integrity auditing with complete Stage 1 receipt, original source-block fingerprint (including zero-unit blocks), full bounded indexed-unit span/hash verification and mismatch/overflow rejection. Only dataset-snapshot integrity is assessed.
+- Historical relation validity and source-version alignment explicitly remain UNDETERMINED; no automatic stale verdict, approval, migration or confirmed dependency. Synthetic offline tests only; production PostgreSQL, Windows GUI, customer PDFs and performance are NOT VERIFIED.
+
+## v1.40 — Stage 2 body layout facts + Stage 3 relation-target diff revalidation (2026-10-23)
+
+- Read-only `STRUCTURAL_LAYOUT` proves same section, direct parent/child section or consecutive extracted unit order using two independently verified source spans, document identity, version identity, page, Unicode offsets and SHA-256. `REJECTED` endpoints excluded; bounded 120-unit scan fails closed on overflow.
+- No explicit SPEC code: reuse bounded body-backed semantic/SQL code candidates, then independently recheck both endpoints; fallback to existing exact/catalog title lookup. No global requirement scan.
+- Join reviewed-for-source-fidelity `STRUCTURAL_REFERENCE` citations and hash-checked READY `CHAPTER_VERSION_DIFF` into `REFERENCE_CHANGE_REVALIDATION` only for exact same scope, target document, target version, specification code and matching section. No impact or stale inference; no approval/writes/migration.
+- New offline contract/negative tests and guidance in `docs/ENGINEERING_v1.40_LAYOUT_DISCOVERY_AND_CHANGE_REVALIDATION_CN.md`; production database/Windows/real PDF/performance NOT VERIFIED.
+
+## v1.39 — Stage 2 rule-verified section citations + Stage 3 extracted chapter diffs (2026-10-23)
+
+- New **read-only** `STRUCTURAL_REFERENCE` retrieval path resolves source-exact same-clause SPEC/section citations to the selected target's PRIMARY/SPEC_BODY section, independently of the v1.33 review infrastructure. Confirms *only the literal reference*, not functional dependency, conformance or impact. Multiple requirement units in a section remain **one section-level citation**; no arbitrary requirement-to-requirement claim.
+- New **read-only** `CHAPTER_VERSION_DIFF` path filters READY persisted body-to-body changes by explicit section/chapter, keyword and exact version pair, checking stored old/new SHA-256 before presentation. Missing history is **not** evidence of no change; this does not reconstruct unpersisted diffs.
+- Current-version metadata constraints, two-end full content span verification, bounded SQL results and deterministic failure isolation; no automatic approvals, database migration, Qdrant rebuild or live production acceptance.
+- 15 isolated adverse regression tests; source-only delivery. Production PostgreSQL 17, Windows GUI, real 508→550 PDF and performance thresholds remain **NOT VERIFIED**.
+
+## v1.38 — Historical BUG-to-SPEC offline candidate indexing (2026-10-23)
+
+- Opt-in QABUG-only tables for approved exact software→spec-version identity and UNREVIEWED candidate evidence; no cross-database FK or automated status approval.
+- Bounded deterministic offline BUG phenomenon extraction/lexical top-N ranking with historical SPEC_BODY-only, immutable source text/span hash validation; dry-run default, distinct DB credentials.
+- Online exact BUG-key lookup rechecks QABUG current source digest and historical spec-unit identity and body source; exposes display-only suggestions in Windows GUI / non-stream API but **never** in model context or evidence strength.
+- Offline synthetic adverse tests cover version drift, coversheet and hash rejection. No live DB migration, Windows GUI runtime, Qdrant index change, 4B extraction or normative compliance verdict.
+
+
+## v1.37 — Stage 2 database semantic gate and uncertain-commit reconciliation (2026-10-22)
+
+- Added an **opt-in**, transaction-bound PostgreSQL 17 migration replacing the trusted relation write guard and creating a bounded, conservative server-side SPEC/section reference validator. Transitioning a `REFERENCES_SECTION` edge to CONFIRMED now checks the cited target and rejects multi-requirement target sections; it does not claim reference implies functional dependency.
+- Pinned trusted SQL function bodies (UTF-8 prosrc SHA-256) in read-only preflight v3, and added a same-transaction client fail-closed write check when DB v1.37 is not installed. Existing v1.33 authenticated function, audit and grants remain intact.
+- Exposed last audit watermark in review previews; added an opt-in read-only audit/identity/hash-based uncertain COMMIT reconciliation tool, always disallowing automatic retry.
+- Added adverse-case synthetic regressions and operator deployment notes. **No live PostgreSQL 17 migration or end-to-end concurrency/permissions validation, Windows GUI test, or real 508/550 PDF verification was performed.**
+
+## v1.36 — Stage 2 reference anchor fidelity and honest commit outcome (2026-10-22)
+
+- Source-exact, clause-scoped specification/section reference anchors now power both proposal generation and persistence backfill. Ambiguous target sections are not converted into arbitrary requirement-to-requirement edges.
+- Audit preview and RAG independently recheck that REFERENCES_SECTION genuinely names the selected target code and section; GUI, HTML graph and RAG expose exact anchors and state that reference != proven engineering dependency/impact.
+- Offline bundle verification rederives exported anchors from both source text and target identity.
+- GUI does not assert rollback when a network failure leaves a PostgreSQL COMMIT outcome uncertain; operator must re-query status and audit before retrying.
+- Existing controlled review SQL function was not changed; this is an application/retrieval fidelity layer and does not claim to be a new DB-side authorization barrier. No live DB/Windows/real-PDF acceptance.
+
+## v1.35 — Stage 2 full-database role authorization audit (2026-10-22)
+
+- The Stage 2 PostgreSQL preflight now audits up to 500 non-superuser LOGIN roles capable of connecting to the target engineering DB, regardless of optional --app-role arguments; exceeding the cap is BLOCKED.
+- Detects effective unregistered EXECUTE, indirect membership in the trusted function-owner role, table/column UPDATE, sensitive audit writes, TRIGGER/TRUNCATE and schema CREATE on the reviewed objects. Additional checks constrain guard function invoker/search_path attributes and function-owner privileged role flags.
+- Preflight JSON version v2; review GUI and preflight have local lock/statement timeouts. No database migrations, automatic approvals, grants or data/index mutations; offline tests only, with live PostgreSQL and Windows verification pending.
+
+## v1.34 — Stage 2 DB permission preflight & main GUI launcher (2026-10-21)
+
+- Permanently fail-closed the legacy v1.31 self-declared actor direct UPDATE/INSERT API. The authenticated database function is the only supported writer.
+- Main Settings GUI now opens the Stage 2 local reviewer console in a separate Python process with distinct PostgreSQL credentials; frozen EXE builds refuse unverified support.
+- Added an opt-in read-only PostgreSQL configuration/grant preflight. It checks database/project identity, exact trigger target bindings, active full-operation triggers, SECURITY DEFINER/search_path, trusted NOLOGIN non-super function owner, no PUBLIC function EXECUTE, reviewer enrollment and effective reviewer/application role privileges including inherited grants. Returns `BLOCKED` with exit code 2 on a failed check, never auto-approves, changes schema or grants; report contains role identifiers but no engineering text.
+- Added CLI regression tests with fake DB, negative privileges and transaction semantics. Live PostgreSQL and Windows GUI integration are still pending; offline preflight PASS is not production acceptance.
+
+
+
+## v1.33 — Stage 2 trusted PostgreSQL review authority and local review GUI (2026-10-21)
+
+- Added an isolated Tk Stage 2 reviewer workbench with full original two-ended evidence, explicit candidate/digest-prefix human acknowledgement, typed reason, explicit outcome and second confirmation. All display operations are READ ONLY; privileged writes are separate and never exposed through WebUI.
+- Added opt-in PostgreSQL migration for dedicated SECURITY DEFINER review function: authenticated session_user allowlist, project/current-primary-version/source-span checks, NFKC hash and complete receipt checks, status precondition, relation/source row locks and one audit event in the same transaction. Database triggers reject normal-user relation updates and direct audit modification; audit events append only (subject to trusted DBA and schema owner exceptions).
+- Review CLI now requires a dedicated DB reviewer login and independently previewed two-end SHA-256 digests instead of accepting a self-asserted --actor for writes. Reviewer connections need SELECT + EXECUTE, not direct UPDATE/INSERT. Legacy direct-DML helper remains in source for old code/tests but is blocked for non-owner roles after migration.
+- Added explicit audit `identity_provenance` (`UNVERIFIED_LEGACY` vs authenticated `DB_SESSION_USER`). RAG requires the authenticated last event, a matching reviewed_by identity, installed function and two active guard triggers; historical self-asserted approvals cannot silently become RAG evidence. Review UI/report exposes the source of the last approval.
+- Explicit unknown document_role values are treated as non-primary, never silently promoted to technical body evidence. The Stage 2 function requires the same trusted body labels and excludes coversheets.
+- Offline synthetic regressions only: no production SQL migration executed, database grants audited, Windows GUI run, or 508→550 physical PDF acceptance. The v1.32 standalone snapshot is still read-only; never use it to authorize a state change.
+
+
+## v1.32 — Stage 2 local content-node graph snapshot (2026-10-21)
+
+- Added an offline, read-only graph exporter. Each source->target paragraph/requirement edge retains exact original text, file, project, version, page, section, offsets and text hash. Up to 40 content edges are displayed in an SVG topology; all validated edges up to the 200-record export cap have full HTML details.
+- Revalidates candidate provenance using the existing fail-closed content-review loader, including complete backfill. Exports bad or STALE candidate IDs only as quarantine diagnostics, never their untrusted content. The export report never changes review state or RAG retrieval permissions.
+- Added self-contained no-script, no-CDN HTML; JSON, checksum manifest and offline verification. Hashes are not signatures; verified outputs are historical, may include confidential primary specification text and require OS-level ACL controls.
+- Added mocked database read-only transaction and output-integrity regressions. No live PostgreSQL/Windows GUI/real 508→550 validation, production authentication or schema upgrade. Direct continuation of v1.31 (main v1.30 baseline), not of absent v2.4.22.
+
+
+## v1.31 — Stage 2 auditable content relation review gate (2026-10-21)
+
+- Added `content_relation_review`: complete source/target provenance verification (current authoritative version, same engineering project, primary SPEC_BODY-equivalent document, original SQL content, Unicode offsets and SHA-256), human-only state transitions, optimistic previous state and a transaction-scoped audit append. Explicit dry-run queue / full evidence preview CLI.
+- Content relation RAG now returns only **audited CONFIRMED** edges from configured engineering scopes, excluding QA/BUG and all unreviewed/rejected/stale proposals; exact source chunk offsets/hashes rechecked at retrieval time. Both endpoint locations and hashes are retained in citation metadata.
+- Added adverse-case isolated regression coverage. No database schema migration, no reindex, no authenticated reviewer identity, no live PostgreSQL/Qdrant/Windows/real PDF certification. Base is repository v1.30 (2a41f0c), not an unprovided v2.4.22 build. OpenAI API contract unchanged.
+
 
 ## v1.30 — Internal-only multilingual Agent pre-Stage2 (2026-10-14)
 

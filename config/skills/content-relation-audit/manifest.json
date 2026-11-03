@@ -1,0 +1,14 @@
+{
+  "name": "content-relation-audit",
+  "stage": "Stage 2",
+  "capability": "STRUCTURAL_REFERENCE_ONLY",
+  "input_keys": [
+    "source",
+    "target"
+  ],
+  "auto_execution": false,
+  "runtime": "bounded_python_tool",
+  "network": "OFF",
+  "database_write": false,
+  "production_acceptance": "NOT_ASSESSED"
+}

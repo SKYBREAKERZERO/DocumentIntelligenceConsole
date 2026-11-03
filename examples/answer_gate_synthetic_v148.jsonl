@@ -1,0 +1,6 @@
+{"case_id":"literal-correct-ms","dataset_type":"SYNTHETIC_CONTRACT","answer":"点火开启后超时为500ms。[1]","evidence":[{"id":"1","text":"When ignition ON, timeout 500 ms; except in sleep state.","label":"550 v2.52"}],"expected_accept":true}
+{"case_id":"literal-compatible-seconds","dataset_type":"SYNTHETIC_CONTRACT","answer":"点火开启后超时为0.5s。[1]","evidence":[{"id":"1","text":"When ignition ON, timeout 500 ms; except in sleep state.","label":"550 v2.52"}],"expected_accept":true}
+{"case_id":"literal-wrong-timeout","dataset_type":"SYNTHETIC_CONTRACT","answer":"点火开启后超时为600ms。[1]","evidence":[{"id":"1","text":"When ignition ON, timeout 500 ms; except in sleep state.","label":"550 v2.52"}],"expected_accept":false}
+{"case_id":"wrong-version","dataset_type":"SYNTHETIC_CONTRACT","answer":"适用的是v2.53。[1]","evidence":[{"id":"1","text":"When ignition ON, timeout 500 ms.","label":"550 v2.52"}],"expected_accept":false}
+{"case_id":"unrelated-citation","dataset_type":"SYNTHETIC_CONTRACT","answer":"超时500ms。[2]","evidence":[{"id":"1","text":"Timeout 500 ms"},{"id":"2","text":"Timeout 200 ms"}],"expected_accept":false}
+{"case_id":"unsupported-claim-without-literal","dataset_type":"SYNTHETIC_CONTRACT","answer":"全部状态下都必须打开。[1]","evidence":[{"id":"1","text":"When ignition ON, timeout 500 ms; except in sleep state."}],"expected_accept":true}

@@ -14,6 +14,11 @@ from app.project.project_registry import ProjectRegistry
 from app.storage.project_database_router import ProjectDatabaseRouter
 from app.storage.specification_version_manager import SpecificationVersionManager
 from app.relations.manager import EngineeringRelationManager
+from app.engineering_intelligence.persistence import (
+    backfill_content_relations,
+    backfill_version,
+    schema_ready as intelligence_schema_ready,
+)
 
 
 class PostgresStorageError(RuntimeError):
@@ -267,6 +272,34 @@ class PostgresStorage:
         savepoint = "engineering_relation_extraction"
         cur.execute(f"SAVEPOINT {savepoint}")
         try:
+            if intelligence_schema_ready(cur):
+                chunks, units = backfill_version(
+                    cur,
+                    specification_id=specification_id,
+                    version_id=version_id,
+                    document_id=document_id,
+                    dry_run=False,
+                    max_units_per_content=10_000,
+                )
+                cur.execute(
+                    "SELECT spec_code FROM public.specifications WHERE id=%s",
+                    (specification_id,),
+                )
+                code_row = cur.fetchone()
+                source_code = str(code_row[0] or "") if code_row else ""
+                relation_stats = backfill_content_relations(
+                    cur,
+                    source_specification_id=specification_id,
+                    source_version_id=version_id,
+                    source_spec_code=source_code,
+                    max_units=100_000,
+                )
+                document.metadata["content_intelligence_status"] = "READY"
+                document.metadata["content_intelligence_chunks"] = chunks
+                document.metadata["content_intelligence_units"] = units
+                document.metadata["content_relation_candidates"] = int(
+                    relation_stats.get("candidate_edges", 0)
+                )
             result = self.engineering_relation_manager.ensure_for_version(
                 cur=cur,
                 specification_id=specification_id,

@@ -1,0 +1,10 @@
+{
+  "answer": "启动后等待时间为500ms。[1]",
+  "evidence": [
+    {
+      "id": "1",
+      "text": "When ignition is ON, Bluetooth audio shall be ready within 500ms.",
+      "label": "550 v2.52 section 4.1 PDF page 31"
+    }
+  ]
+}

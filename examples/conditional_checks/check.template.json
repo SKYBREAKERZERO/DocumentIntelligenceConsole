@@ -1,0 +1,13 @@
+{
+  "mapping_id": null,
+  "content_id": null,
+  "rule_json": {
+    "kind": "MAXIMUM",
+    "measurement_key": "stop_latency_ms",
+    "measurement_label": "停播耗时（毫秒）",
+    "conditions": {"ignition":"OFF","emergency_call":false},
+    "anchor": "within 700 ms",
+    "unit": "ms",
+    "expected": 700
+  }
+}

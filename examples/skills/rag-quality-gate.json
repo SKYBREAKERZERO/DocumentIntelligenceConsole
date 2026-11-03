@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "case_id": "SYN-001",
+      "dataset_type": "SYNTHETIC_CONTRACT",
+      "answer": "启动后等待时间为500ms。[1]",
+      "evidence": [
+        {
+          "id": "1",
+          "text": "When ignition ON, timeout 500ms",
+          "label": "sample"
+        }
+      ],
+      "expected_accept": true
+    }
+  ]
+}

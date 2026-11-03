@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import cmp_to_key
+from pathlib import Path
 from typing import Any, Iterator, Sequence
 
 import psycopg
@@ -455,6 +456,7 @@ class SchemaManager:
                     )
                     self._create_rag_views(cursor, created)
                     self._record_project_identity(cursor)
+                    self._ensure_engineering_intelligence_schema(cursor, created)
                     self._record_schema_version(cursor)
                 connection.commit()
         except Exception as exc:
@@ -478,6 +480,33 @@ class SchemaManager:
             duplicate_index_groups=report.duplicate_index_groups,
             warnings=tuple(warnings) + report.warnings,
         )
+
+    def _ensure_engineering_intelligence_schema(
+        self, cursor: Any, created: list[str],
+    ) -> None:
+        """Install additive content-unit tables during one-click DB setup.
+
+        QA/BUG has its own schema. Engineering databases receive the same v7
+        and Stage-1 v2 contract used by offline backfill, so every later ingest
+        can create source spans and relation candidates automatically.
+        """
+        project = str(self.project_code or "").upper()
+        if project not in {"21MM", "24MM", "COMMON"}:
+            return
+        root = Path(__file__).resolve().parents[2]
+        for name in (
+            "upgrade_engineering_intelligence_v7.sql",
+            "upgrade_engineering_stage1_v2.sql",
+        ):
+            path = root / "database" / name
+            if not path.is_file():
+                raise SchemaManagerError(f"Missing additive engineering migration: {path}")
+            source = path.read_text(encoding="utf-8")
+            source = source.replace("BEGIN;", "", 1)
+            if source.rstrip().endswith("COMMIT;"):
+                source = source.rstrip()[:-len("COMMIT;")]
+            cursor.execute(source)
+            created.append(f"engineering-intelligence:{name}")
 
     def inspect_schema(self) -> SchemaReport:
         required_tables = tuple(self.REQUIRED_TABLE_COLUMNS)
@@ -2613,7 +2642,7 @@ class SchemaManager:
                 tgt.specification_key, tgt.canonical_name, r.target_entity_id, te.entity_type,
                 te.entity_key, te.canonical_name, r.target_external_key, r.relation_type,
                 r.extraction_method, r.confidence, r.status, r.is_explicit,
-                run.extractor_version, run.status, src.current_version_id, r.metadata, r.created_at
+                run.id, src.id, run.extractor_version, run.status, src.current_version_id, r.metadata, r.created_at
             """
         )
         if not relation_catalog_existed:

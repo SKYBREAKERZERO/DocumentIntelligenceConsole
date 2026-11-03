@@ -218,6 +218,32 @@ class PDFPipeline:
             )
         )
 
+        if not document.contents and any(page.text.strip() for page in document.pages):
+            if str(self.project_code or "").upper() == "COMMON":
+                # Ordinary PDFs need not have specification chapter numbering.
+                # Preserve filtered page text with explicit synthetic structure,
+                # rather than silently publishing a successful empty JSON file.
+                from app.model.chapter import Chapter
+                from app.model.content import Content
+                container = "__UNSTRUCTURED_PAGES__"
+                document.chapters = [Chapter(id=container, title_en="Unstructured source pages",
+                    metadata={"synthetic": True, "source_heading_verified": False})]
+                document.sections.clear()
+                document.contents = [Content(chapter_id=container, text=page.text,
+                    page_number=page.page_number, metadata={"source_kind": "FILTERED_PDF_PAGE_TEXT",
+                    "structure_verified": False, "synthetic_container": True})
+                    for page in document.pages if page.text.strip()]
+                document.metadata.update({"unstructured_page_fallback": True,
+                    "import_status": "IMPORTED_WITH_WARNING",
+                    "import_warning_codes": list(dict.fromkeys([
+                        *(document.metadata.get("import_warning_codes") or []), "PDF_UNSTRUCTURED_PAGE_FALLBACK"])),
+                    "import_warning_message": "Common PDF retained by source page; generated container is not an original chapter."})
+            else:
+                from app.analyzer.import_resilience_policy import ImportResiliencePolicy
+                document = ImportResiliencePolicy.mark_metadata_only(document,
+                    warning_code="PDF_NO_STRUCTURED_BODY", parser_name="PDFParser",
+                    warning_message="Text was extracted but no structured body survived parsing; review the source before indexing.")
+
         # =====================
         # 8. Chunk
         # =====================

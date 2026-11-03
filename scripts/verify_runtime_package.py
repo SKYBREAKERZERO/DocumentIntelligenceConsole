@@ -22,7 +22,7 @@ def missing_internal_imports(root: Path) -> list[tuple[str, str]]:
         try:
             tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
         except (SyntaxError, UnicodeError, OSError) as error:
-            missing.add((str(path.relative_to(root)), f"invalid Python source: {error}"))
+            missing.add((path.relative_to(root).as_posix(), f"invalid Python source: {error}"))
             continue
         modules = []
         for node in ast.walk(tree):
@@ -35,7 +35,7 @@ def missing_internal_imports(root: Path) -> list[tuple[str, str]]:
         for module in modules:
             target = root.joinpath(*module.split("."))
             if not (target.is_dir() or target.with_suffix(".py").is_file()):
-                missing.add((str(path.relative_to(root)), module))
+                missing.add((path.relative_to(root).as_posix(), module))
     return sorted(missing)
 
 

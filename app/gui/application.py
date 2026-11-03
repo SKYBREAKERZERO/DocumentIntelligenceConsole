@@ -9,7 +9,7 @@ import queue
 import sys
 import threading
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from tkinter import (
@@ -199,7 +199,7 @@ from app.gui.ai_workspace import AIWorkspaceModule
 
 APP_NAME = "文档智能控制台"
 # APP_NAME = "Document Intelligence Console Enterprise"
-APP_VERSION = "1.30"
+APP_VERSION = "1.53"
 # APP_VERSION = "5.7.3-CN"
 # APP_VERSION = "5.6.0"
 # Historical source-contract compatibility markers. These are comments only;
@@ -419,6 +419,7 @@ class BatchSummary:
     total: int
     warnings: int = 0
     cancelled: bool = False
+    pipeline_status: str = ""
 
 
 # ============================================================
@@ -611,12 +612,12 @@ class DocumentIngestionGUI:
         self.root.title(APP_NAME)
 
         self.root.geometry(
-            "1900x1080"
+            "1380x900"
         )
 
         self.root.minsize(
-            1440,
-            850,
+            1120,
+            740,
         )
 
         self.root.protocol(
@@ -1134,6 +1135,8 @@ class DocumentIngestionGUI:
         self._sidebar_group_items: dict[str, str] = {}
 
         page_defs = {
+            "core_home": "企业知识后台",
+            "skills": "Skills 能力中心",
             "ai_chat": "Enterprise AI Agent",
             "ai_settings": "AI & RAG Configuration",
             "ai_status": "AI Service Status",
@@ -1207,8 +1210,15 @@ class DocumentIngestionGUI:
             USER_CONFIG_DIR,
         )
 
+        from app.gui.core_workspace import build_home, build_skills
+        build_home(self, self._pages["core_home"], USER_CONFIG_DIR)
+        build_skills(self, self._pages["skills"])
+
         self._build_app_status_bar(shell)
-        self.navigate("ai_chat")
+        if os.environ.get("DIC_CONSOLE_MODE", "core").lower() == "advanced":
+            self.navigate("ai_chat")
+        else:
+            self.navigate("core_home")
 
     def _build_unified_header(self, parent: ttk.Frame) -> None:
         # Compact header: keep only the product name and processing scope.
@@ -1313,7 +1323,13 @@ class DocumentIngestionGUI:
             ("ADMINISTRATION", [("settings", "Settings")]),
         ]
 
-        start_group = self._sidebar_start_group or self._sidebar_open_group or "AI WORKSPACE"
+        if os.environ.get("DIC_CONSOLE_MODE", "core").lower() != "advanced":
+            from app.gui.core_workspace import CORE_GROUPS
+            groups = CORE_GROUPS
+            start_group = "核心后台"
+        else:
+            groups.insert(0, ("核心后台", [("core_home", "后台总览 / 一键入库"), ("skills", "Skills 能力中心"), ("qdrant", "Qdrant 库查看")]))
+            start_group = self._sidebar_start_group or "AI WORKSPACE"
         for group_name, items in groups:
             group_iid = f"group::{group_name}"
             tree.insert(
@@ -1387,6 +1403,7 @@ class DocumentIngestionGUI:
         self._sync_sidebar_selection_for_page(page_key)
         host.tkraise()
         labels = {
+            "core_home": "企业知识后台", "skills": "Skills 能力中心",
             "ai_chat": "Enterprise AI Agent", "ai_audit": "AI Query Audit",
             "ai_settings": "AI & RAG Configuration", "ai_status": "AI Service Status",
             "document_import": "Document Import",
@@ -2672,6 +2689,30 @@ class DocumentIngestionGUI:
         except (OSError, ValueError) as exc:
             messagebox.showerror("Stage 1 审核", str(exc), parent=self.root)
 
+    def _open_stage2_review_window(self) -> None:
+        """Open a separate Stage 2 DB-reviewed window; never share app credentials."""
+        import subprocess
+
+        if getattr(sys, "frozen", False):
+            messagebox.showwarning(
+                "Stage 2 审核",
+                "此审核窗口尚未经过独立 Windows EXE 打包及验收；请用源码 Python 启动。",
+                parent=self.root,
+            )
+            return
+        try:
+            project_root = Path(__file__).resolve().parents[2]
+            subprocess.Popen(
+                [sys.executable, "-m", "app.gui.stage2_review_window"],
+                cwd=str(project_root),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+            )
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Stage 2 审核", str(exc), parent=self.root)
+
     # v1.04: developer-only local external UI & backend diagnostics.
     # This card belongs to the tool's main Settings page (not to Open WebUI).
     def _build_local_webui_settings_card(self, parent: ttk.Frame) -> None:
@@ -2682,6 +2723,8 @@ class DocumentIngestionGUI:
         self.local_webui_url_var = tk.StringVar(value=existing.external_webui_url)
         self.local_backend_port_var = tk.StringVar(value=str(existing.api_port))
         self.local_webui_health_var = tk.StringVar(value="尚未检测 · 状态为实时探测结果，非模拟")
+        from app.enterprise.local_deployment import webui_access_addresses
+        self.local_access_urls_var = tk.StringVar(value=webui_access_addresses(3000))
 
         card = ttk.LabelFrame(parent, text="3. 外部 UI / Open WebUI · 本机开发者面板", padding=16, style="Card.TLabelframe", bootstyle="secondary")
         card.pack(fill=X, pady=(10, 12))
@@ -2697,10 +2740,20 @@ class DocumentIngestionGUI:
         ttk.Button(bar, text="保存 WebUI 配置", command=self._save_local_webui, bootstyle="success-outline").pack(side=LEFT, padx=(0, 6))
         ttk.Button(bar, text="检查服务状态", command=self._check_local_webui_services, bootstyle="info-outline").pack(side=LEFT)
         ttk.Label(card, textvariable=self.local_webui_health_var, justify="left", wraplength=520, bootstyle="secondary").grid(row=3, column=0, columnspan=2, sticky="w", pady=(7, 0))
-        ttk.Label(card, text="独立后台保持 localhost:18080；局域网只共享 Open WebUI，不共享 SQL/Qdrant/Ollama。", bootstyle="secondary", wraplength=520).grid(row=4, column=0, columnspan=2, sticky="w", pady=(7, 0))
+        access = ttk.LabelFrame(card, text="访问地址（请按使用设备选择）", padding=9, bootstyle="info")
+        access.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Label(access, textvariable=self.local_access_urls_var, justify="left", wraplength=650, font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w")
+        ttk.Label(access, text="注意：其他机器不能使用 127.0.0.1；它代表那台机器自己。地址与共享状态每5秒自动刷新。", bootstyle="warning").pack(anchor="w", pady=(5, 0))
+        access_controls = ttk.Frame(access)
+        access_controls.pack(anchor="w", pady=(7, 0))
+        ttk.Button(access_controls, text="复制本机地址", command=lambda: self._copy_webui_access_address(False), bootstyle="secondary-outline").pack(side=LEFT, padx=(0, 6))
+        ttk.Button(access_controls, text="复制其他设备地址", command=lambda: self._copy_webui_access_address(True), bootstyle="secondary-outline").pack(side=LEFT, padx=(0, 6))
+        ttk.Button(access_controls, text="手动刷新", command=self._refresh_lan_share_status, bootstyle="info-outline").pack(side=LEFT)
+        self.root.after(5000, self._schedule_access_url_refresh)
+        ttk.Label(card, text="独立后台保持 localhost:18080；局域网只共享 Open WebUI，不共享 SQL/Qdrant/Ollama。", bootstyle="secondary", wraplength=520).grid(row=5, column=0, columnspan=2, sticky="w", pady=(7, 0))
 
         manager = ttk.LabelFrame(card, text="后台进程与 Windows 登录自启动", padding=9, bootstyle="secondary")
-        manager.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        manager.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         manager.columnconfigure(0, weight=1)
         self.local_backend_status_var = tk.StringVar(value="启动后自动检测后台（关闭 GUI 不停止 Backend）")
         ttk.Label(manager, textvariable=self.local_backend_status_var, wraplength=480, bootstyle="secondary").grid(row=0, column=0, columnspan=2, sticky="w")
@@ -2737,7 +2790,7 @@ class DocumentIngestionGUI:
         ).grid(row=4, column=0, sticky="w", pady=(6, 0))
 
         lan = ttk.LabelFrame(card, text="当前 Wi-Fi 局域网共享（仅 Open WebUI）", padding=9, bootstyle="secondary")
-        lan.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        lan.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         from app.enterprise.local_deployment import lan_share_status
         self.local_lan_status_var = tk.StringVar(value=lan_share_status())
         ttk.Label(lan, textvariable=self.local_lan_status_var, wraplength=500, bootstyle="secondary").pack(anchor="w")
@@ -2826,8 +2879,25 @@ class DocumentIngestionGUI:
         )
 
     def _refresh_lan_share_status(self) -> None:
-        from app.enterprise.local_deployment import lan_share_status
+        from app.enterprise.local_deployment import lan_share_status, webui_access_addresses
         self.local_lan_status_var.set(lan_share_status())
+        if hasattr(self, "local_access_urls_var"):
+            self.local_access_urls_var.set(webui_access_addresses(3000))
+
+    def _schedule_access_url_refresh(self) -> None:
+        """Refresh displayed LAN addresses without blocking or restarting Tool."""
+        try:
+            self._refresh_lan_share_status()
+            self.root.after(5000, self._schedule_access_url_refresh)
+        except tk.TclError:
+            return
+
+    def _copy_webui_access_address(self, lan: bool) -> None:
+        from app.enterprise.local_deployment import current_lan_ipv4
+        value = f"http://{current_lan_ipv4()}:3000" if lan and current_lan_ipv4() else "http://127.0.0.1:3000"
+        self.root.clipboard_clear()
+        self.root.clipboard_append(value)
+        self.local_webui_health_var.set(f"已复制：{value}")
 
     def _configure_lan_share(self, action: str) -> None:
         from app.ai.local_webui import validate_local_webui_url
@@ -3257,6 +3327,14 @@ class DocumentIngestionGUI:
             command=self._open_stage1_review_window,
             bootstyle="info-outline",
         ).pack(fill=X, pady=(12, 0))
+
+        # Stage 2 reviewers always authenticate separately from the main GUI.
+        ttk.Button(
+            frame,
+            text="Stage 2 · 内容关系双端证据审核（独立登录）",
+            command=self._open_stage2_review_window,
+            bootstyle="info-outline",
+        ).pack(fill=X, pady=(8, 0))
 
         schema_row = ttk.Frame(
             frame
@@ -5122,12 +5200,12 @@ class DocumentIngestionGUI:
                 postgres_profile=pg, password=password, qdrant_service=qdrant,
             ).validate()
             self._emit("qabug_import_result", {
-                "success": bool(sql_report.ok and quality.status == "PASS"),
+                "success": bool(sql_report.ok and vector_report.status == "READY" and quality.status == "PASS"),
                 "record_type": record_type, "file": selected,
                 "rows_seen": sql_report.rows_seen, "records": sql_report.records_upserted,
                 "chunks": sql_report.chunks_upserted, "failed": sql_report.rows_failed,
                 "quarantined": getattr(sql_report, "rows_quarantined", 0),
-                "points": vector_report.points_upserted, "quality": quality.status,
+                "points": vector_report.points_upserted, "quality": quality.status, "sync_status": vector_report.status,
                 "quality_detail": {
                     "sql_records": quality.sql_records, "sql_chunks": quality.sql_chunks,
                     "qdrant_points": quality.qdrant_points, "missing": quality.missing_points,
@@ -11570,8 +11648,90 @@ class DocumentIngestionGUI:
     # Start Processing
     # ========================================================
 
+    def start_core_ingestion(self) -> None:
+        if self.is_processing:
+            return
+        if self.enterprise_module.rag_sync_thread and self.enterprise_module.rag_sync_thread.is_alive():
+            messagebox.showinfo("一键入库", "当前向量同步未结束，请稍后再入库。", parent=self.root)
+            return
+        # This button explicitly requests the full chain; ordinary conversion
+        # keeps its original independent JSON / SQL switches.
+        self.save_json_var.set(True)
+        self.save_database_var.set(True)
+        self.start_processing(complete_chain=True)
+
+    def _capture_spec_chain(self, options, files):
+        from app.ai.config import AISettingsStore
+        from app.server.configuration import require_local_host, require_local_url
+        from app.enterprise.core_operations import IngestionReceipt
+        from app.rag.qdrant_sync import CurrentQdrantSyncService
+        from app.rag.qdrant_governance import QdrantDataQualityValidator
+        config = options.database_config
+        require_local_host(config.host)
+        settings = AISettingsStore(USER_CONFIG_DIR / "ai_config.json").load()
+        qurl = require_local_url(self.qdrant_url_var.get(), label="Qdrant")
+        postgres = PostgresProfile(host=config.host, port=config.port, database=config.database,
+                                   user=config.user, connect_timeout=config.connect_timeout)
+        service = CurrentQdrantSyncService(
+            postgres=postgres, postgres_password=config.password or os.getenv(config.password_env, ""),
+            qdrant=QdrantProfile(url=qurl, timeout=float(self.qdrant_timeout_var.get())),
+            qdrant_api_key=self.qdrant_api_key_var.get(), project_code=options.project_code,
+            collection_name=settings.collections[options.project_code],
+            embedding_model=settings.embedding_model, vector_dimension=settings.vector_dimension,
+        )
+        validator = QdrantDataQualityValidator(
+            postgres=postgres, postgres_password=service.postgres_password, qdrant=service.qdrant,
+            project_code=service.project_code, collection_name=service.collection_name,
+            embedding_model=service.embedding_model, embedding_version=service.embedding_version,
+            vector_dimension=service.vector_dimension,
+        )
+        receipt = IngestionReceipt(USER_CONFIG_DIR / "ingestion_runs", scope=options.project_code,
+                                   files=files, database=config.database, collection=service.collection_name)
+        return service, validator, receipt
+
+    def _process_core_spec_files(self, **kwargs):
+        try:
+            if kwargs["options"].project_code == "QABUG":
+                self._process_qabug_files(**kwargs)
+            else:
+                self._process_files(**kwargs)
+        except Exception as exc:
+            LOGGER.exception("Core ingestion interrupted")
+            receipt = kwargs["receipt"]
+            receipt.data.update(status="PARTIAL", error_type=type(exc).__name__, retry="REVIEW_INPUTS_AND_SQL_STATE")
+            try:
+                receipt.save()
+            except OSError:
+                LOGGER.exception("Could not persist ingestion receipt")
+            self._emit("log", "CORE PIPELINE interrupted; SQL may be committed. Inspect logs and receipt before retrying.")
+            self._emit("finished", BatchSummary(success=0, failed=len(kwargs["files"]),
+                       total=len(kwargs["files"]), warnings=1, pipeline_status="PARTIAL"))
+        finally:
+            ProjectDatabaseRouter.clear_runtime_override(kwargs["options"].project_code)
+
+    def _capture_qabug_chain(self, runtime, files):
+        from app.ai.config import AISettingsStore
+        from app.server.configuration import require_local_host, require_local_url
+        from app.enterprise.core_operations import IngestionReceipt
+        from app.qabug.sync_adapter import QABugCurrentQdrantSyncService
+        pg, qdrant, password = runtime
+        require_local_host(pg.host)
+        require_local_url(qdrant.profile.url, label="Qdrant")
+        settings = AISettingsStore(USER_CONFIG_DIR / "ai_config.json").load()
+        if settings.collections["QABUG"] != QABUG_COLLECTION:
+            raise ValueError("QA/BUG 必须使用独立的 rag_qabug_current_chunks 集合，请先修正 AI 配置。")
+        service = QABugCurrentQdrantSyncService(postgres=pg, postgres_password=password,
+            qdrant=qdrant.profile, qdrant_api_key=qdrant.api_key,
+            embedding_model=settings.embedding_model, vector_dimension=settings.vector_dimension)
+        validator = QABugDataQualityValidator(postgres_profile=pg, password=password,
+                                              qdrant_service=qdrant, collection_name=QABUG_COLLECTION,
+                                              cancel_check=self.cancel_requested.is_set)
+        receipt = IngestionReceipt(USER_CONFIG_DIR / "ingestion_runs", scope="QABUG", files=files,
+                                   database=pg.database, collection=QABUG_COLLECTION)
+        return service, validator, receipt
+
     def start_processing(
-        self,
+        self, *, complete_chain: bool = False,
     ) -> None:
 
         if self.is_processing:
@@ -11595,6 +11755,26 @@ class DocumentIngestionGUI:
             except Exception as exc:
                 messagebox.showerror("QA/BUG 导入", str(exc), parent=self.root)
                 return
+
+        spec_chain = None
+        if complete_chain and options.project_code != "QABUG":
+            try:
+                if self.enterprise_module.rag_sync_thread and self.enterprise_module.rag_sync_thread.is_alive():
+                    raise RuntimeError("当前向量同步未结束，请稍后再入库。")
+                spec_chain = self._capture_spec_chain(options, files)
+            except Exception as exc:
+                messagebox.showerror("一键入库配置", str(exc), parent=self.root)
+                return
+        elif complete_chain:
+            try:
+                spec_chain = self._capture_qabug_chain(qabug_runtime, files)
+            except Exception as exc:
+                messagebox.showerror("QA/BUG 一键入库配置", str(exc), parent=self.root)
+                return
+        if complete_chain:
+            from uuid import uuid4
+            run_id = spec_chain[2].id if spec_chain else uuid4().hex
+            options = replace(options, output_directory=options.output_directory / "core_runs" / run_id)
 
         self.cancel_requested.clear()
 
@@ -11627,6 +11807,9 @@ class DocumentIngestionGUI:
         worker_kwargs = {"files": files, "options": options}
         if options.project_code == "QABUG":
             worker_kwargs["runtime"] = qabug_runtime
+        if spec_chain is not None:
+            worker = self._process_core_spec_files
+            worker_kwargs.update(vector_service=spec_chain[0], quality_validator=spec_chain[1], receipt=spec_chain[2])
         self.processing_thread = threading.Thread(
             target=worker,
             kwargs=worker_kwargs,
@@ -11722,6 +11905,9 @@ class DocumentIngestionGUI:
         files: list[Path],
         options: ProcessingOptions,
         runtime: tuple[PostgresProfile, QdrantService, str] | None = None,
+        vector_service=None,
+        quality_validator=None,
+        receipt=None,
     ) -> None:
         """Unified QA/BUG ingestion used by the same page as 21MM/24MM/Common.
 
@@ -11747,10 +11933,15 @@ class DocumentIngestionGUI:
                     host=pg.host, port=pg.port, database=pg.database, user=pg.user,
                     password=password, connect_timeout=pg.connect_timeout,
                 ).ensure_schema(create_database=True)
-                QABugQdrantManager(qdrant_service=qdrant).ensure_contract()
+                QABugQdrantManager(qdrant_service=qdrant,
+                    vector_dimension=vector_service.vector_dimension if vector_service is not None else 1024).ensure_contract()
             except Exception as exc:
                 self._emit("log", f"FAILED  | QA/BUG environment | {type(exc).__name__}: {exc}")
-                self._emit("finished", BatchSummary(success=0, failed=total, total=total, warnings=0, cancelled=False))
+                if receipt is not None:
+                    receipt.data.update(status="PARTIAL", error_type=type(exc).__name__, retry="CHECK_CONFIGURATION")
+                    receipt.data["stages"].update(CONVERT_JSON_SQL="FAILED",VECTOR_SYNC="SKIPPED",QUALITY="SKIPPED")
+                    receipt.save()
+                self._emit("finished", BatchSummary(success=0, failed=total, total=total, warnings=0, cancelled=False, pipeline_status="PARTIAL"))
                 return
 
         pipeline = QABugImportPipeline()
@@ -11802,7 +11993,11 @@ class DocumentIngestionGUI:
                     if sql_report.rows_failed:
                         warning_count += 1
                         self._emit("log", f"WARNING | {file_path.name} | row failures={sql_report.rows_failed}")
+                        if receipt is not None:
+                            raise RuntimeError("QA/BUG file contains failed rows; review the SQL import before vector synchronization")
 
+                if receipt is not None:
+                    receipt.file_done(index - 1, success=True)
                 success_count += 1
                 self._emit(
                     "log",
@@ -11811,6 +12006,8 @@ class DocumentIngestionGUI:
                 )
             except Exception as exc:
                 failed_count += 1
+                if receipt is not None:
+                    receipt.file_done(index - 1, success=False)
                 failure = FileFailure(file_path=file_path, error_type=type(exc).__name__, error_message=str(exc))
                 self.failures.append(failure)
                 self._emit("log", f"FAILED  | {file_path.name} | {type(exc).__name__}: {exc}")
@@ -11820,11 +12017,22 @@ class DocumentIngestionGUI:
             self._emit("progress", percentage)
             self._emit("summary", BatchSummary(success=success_count, failed=failed_count, total=total, warnings=warning_count))
 
-        if options.save_database and not cancelled and pg is not None and qdrant is not None:
+        pipeline_status = "CONVERSION_ONLY" if not options.save_database else "PARTIAL"
+        if receipt is not None:
+            self._emit("current_file", "QA/BUG JSON / SQL 结束，正在增量同步并校验…")
+            pipeline_status, extra = receipt.finish_vectors(imported=success_count, failed=failed_count,
+                cancelled=cancelled, service=vector_service, validator=quality_validator,
+                cancel_check=self.cancel_requested.is_set,
+                progress=lambda payload: self._emit("log", "QABUG VECTOR | " + str(payload.get("message") or payload.get("stage") or "running")))
+            warning_count += extra
+            cancelled = cancelled or pipeline_status == "CANCELLED"
+            self._emit("log", f"CORE PIPELINE | status={pipeline_status} | quality={receipt.data['quality']} | retry={receipt.data['retry']} | receipt={receipt.id}")
+        elif options.save_database and not cancelled and not failed_count and pg is not None and qdrant is not None:
             try:
                 self._emit("current_file", "Synchronizing QA/BUG vectors to Qdrant...")
                 vector_report = QABugQdrantManager(qdrant_service=qdrant).sync_from_postgres(
                     postgres_profile=pg, password=password,
+                    cancel_check=self.cancel_requested.is_set,
                     progress=lambda n, total_points, key: self._emit(
                         "log", f"QABUG QDRANT | {n}/{total_points} chunks | {key}"
                     ),
@@ -11846,18 +12054,23 @@ class DocumentIngestionGUI:
                         "quality": quality.status,
                     },
                 )
-                if quality.status != "PASS":
+                if quality.status != "PASS" or vector_report.status != "READY":
                     warning_count += 1
+                pipeline_status = "COMPLETED" if quality.status == "PASS" and vector_report.status == "READY" and not warning_count else "PARTIAL"
                 self._emit("progress", 100)
             except Exception as exc:
                 warning_count += 1
                 self._emit("log", f"WARNING | QA/BUG Qdrant sync incomplete | {type(exc).__name__}: {exc}")
+        elif options.save_database and failed_count:
+            warning_count += 1
+            self._emit("log", "QA/BUG: some files failed; automatic vector sync skipped. Review SQL import and use incremental sync to recover.")
 
         self._emit(
             "finished",
             BatchSummary(
                 success=success_count, failed=failed_count, total=total,
                 warnings=warning_count, cancelled=cancelled,
+                pipeline_status="CANCELLED" if cancelled else pipeline_status,
             ),
         )
 
@@ -11870,6 +12083,9 @@ class DocumentIngestionGUI:
         *,
         files: list[Path],
         options: ProcessingOptions,
+        vector_service=None,
+        quality_validator=None,
+        receipt=None,
     ) -> None:
 
         success_count = 0
@@ -11973,8 +12189,6 @@ class DocumentIngestionGUI:
                         ),
                     )
                 )
-
-                success_count += 1
 
                 pages = len(
                     getattr(
@@ -12083,6 +12297,9 @@ class DocumentIngestionGUI:
                         },
                     )
 
+                if receipt is not None:
+                    receipt.file_done(index - 1, success=True)
+                success_count += 1
                 LOGGER.info(
                     success_message
                 )
@@ -12112,6 +12329,8 @@ class DocumentIngestionGUI:
                 self.failures.append(
                     failure
                 )
+                if receipt is not None:
+                    receipt.file_done(index - 1, success=False)
 
                 gui_message = (
                     ("CONFLICT | " if is_version_conflict else "FAILED  | ")
@@ -12138,7 +12357,7 @@ class DocumentIngestionGUI:
             percentage = int(
                 index
                 / total
-                * 100
+                * (80 if receipt is not None else 100)
             )
 
             self._emit(
@@ -12161,6 +12380,19 @@ class DocumentIngestionGUI:
                 ),
             )
 
+        pipeline_status = ""
+        if receipt is not None:
+            self._emit("current_file", "JSON / SQL 阶段结束，正在增量同步 Qdrant 并校验…")
+            pipeline_status, extra_warnings = receipt.finish_vectors(
+                imported=success_count, failed=failed_count, cancelled=cancelled,
+                service=vector_service, validator=quality_validator,
+                cancel_check=self.cancel_requested.is_set,
+                progress=lambda payload: self._emit("log", "VECTOR | " + str(payload.get("message") or payload.get("stage") or "running")),
+            )
+            warning_count += extra_warnings
+            cancelled = cancelled or pipeline_status == "CANCELLED"
+            self._emit("log", f"CORE PIPELINE | status={pipeline_status} | quality={receipt.data['quality']} | retry={receipt.data['retry']} | receipt={receipt.id}")
+
         if runtime_override_active:
             ProjectDatabaseRouter.clear_runtime_override(
                 options.project_code
@@ -12180,6 +12412,7 @@ class DocumentIngestionGUI:
                 cancelled=(
                     cancelled
                 ),
+                pipeline_status=pipeline_status,
             ),
         )
 
@@ -12522,6 +12755,8 @@ class DocumentIngestionGUI:
     ) -> None:
 
         self.is_processing = False
+        if summary.pipeline_status:
+            self._append_log("完整入库流程结果：" + summary.pipeline_status)
 
         self.cancel_requested.clear()
 
@@ -12544,6 +12779,12 @@ class DocumentIngestionGUI:
         self._update_summary(
             summary
         )
+
+        if summary.pipeline_status == "PARTIAL" and not summary.cancelled:
+            self.status_var.set("部分完成：请检查入库回执 / 日志")
+            self.current_file_var.set("SQL 可能已经提交，Qdrant 或质量校验未完成；请检查失败文件后使用增量同步恢复。")
+            messagebox.showwarning("一键入库未完全完成", "请检查失败文件、日志及入库回执。\nSQL 已提交的数据不会自动回滚。\n无需重跑成功文件；可到 SQL → Qdrant 增量同步页检查和恢复。", parent=self.root)
+            return
 
         if summary.cancelled:
 

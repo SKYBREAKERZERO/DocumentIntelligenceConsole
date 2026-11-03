@@ -1,0 +1,38 @@
+{
+  "sql": [
+    {
+      "scope": "21MM",
+      "document_id": "doc550",
+      "version": "v2.52",
+      "content_id": 17,
+      "content": "When ignition is ON, Bluetooth audio shall be ready within 500ms.",
+      "content_hash": "4775e4eed28ae43999276f76e0c9e035f22cb33d61bd1492ae9dbf38dcab47bd",
+      "file_name": "Bluetooth Audio function spec v2.52.pdf",
+      "document_role": "SPEC_BODY"
+    }
+  ],
+  "dense": [
+    {
+      "scope": "21MM",
+      "document_id": "doc550",
+      "version": "v2.52",
+      "content_id": 17,
+      "content": "When ignition is ON, Bluetooth audio shall be ready within 500ms.",
+      "content_hash": "4775e4eed28ae43999276f76e0c9e035f22cb33d61bd1492ae9dbf38dcab47bd",
+      "file_name": "Bluetooth Audio function spec v2.52.pdf",
+      "document_role": "SPEC_BODY"
+    }
+  ],
+  "sparse": [
+    {
+      "scope": "21MM",
+      "document_id": "doc550",
+      "version": "v2.52",
+      "content_id": 17,
+      "content": "When ignition is ON, Bluetooth audio shall be ready within 500ms.",
+      "content_hash": "4775e4eed28ae43999276f76e0c9e035f22cb33d61bd1492ae9dbf38dcab47bd",
+      "file_name": "Bluetooth Audio function spec v2.52.pdf",
+      "document_role": "SPEC_BODY"
+    }
+  ]
+}

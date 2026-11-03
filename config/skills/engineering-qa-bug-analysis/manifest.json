@@ -1,0 +1,14 @@
+{
+  "name": "engineering-qa-bug-analysis",
+  "stage": "Stage 6",
+  "capability": "CANDIDATE_DISCOVERY_ONLY",
+  "input_keys": [
+    "bug",
+    "units"
+  ],
+  "auto_execution": false,
+  "runtime": "bounded_python_tool",
+  "network": "OFF",
+  "database_write": false,
+  "production_acceptance": "NOT_ASSESSED"
+}

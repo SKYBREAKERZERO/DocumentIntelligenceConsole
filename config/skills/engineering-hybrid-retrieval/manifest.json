@@ -1,0 +1,15 @@
+{
+  "name": "engineering-hybrid-retrieval",
+  "stage": "Stage 4",
+  "capability": "OFFLINE_RANKING_ONLY",
+  "input_keys": [
+    "sql",
+    "dense",
+    "sparse"
+  ],
+  "auto_execution": false,
+  "runtime": "bounded_python_tool",
+  "network": "OFF",
+  "database_write": false,
+  "production_acceptance": "NOT_ASSESSED"
+}

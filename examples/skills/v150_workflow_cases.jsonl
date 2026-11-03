@@ -1,0 +1,5 @@
+{"case_id":"BUG-SPEC-VERSION-MISSING","question":"BUG-23 是否符合 550 v2.52 仕様要求？","retrieved_kinds":["ISSUE_EXACT","SQL_EXACT"],"expected_missing":["VERSION"]}
+{"case_id":"BUG-SPEC-RELATION-MISSING","question":"AUDIO-123 和 508 对 550 的关系是否受到历史变更影响","retrieved_kinds":["ISSUE_EXACT","SQL_EXACT","VERSION_CHANGE"],"expected_missing":["RELATION"]}
+{"case_id":"RELATION-TEXT-ONLY","question":"508 与 550 的历史变更影响","retrieved_kinds":["STRUCTURAL_REFERENCE","SQL_EXACT"],"expected_missing":["VERSION"]}
+{"case_id":"ALL-LANES","question":"BUG-23 与 550 历史版本和 508 工程关系","retrieved_kinds":["ISSUE_EXACT","SQL_EXACT","CHAPTER_VERSION_DIFF","CONTENT_RELATION"],"expected_missing":[]}
+{"case_id":"SINGLE-ISSUE","question":"BUG-23 当前状态？","retrieved_kinds":["ISSUE_EXACT"],"expected_missing":[]}

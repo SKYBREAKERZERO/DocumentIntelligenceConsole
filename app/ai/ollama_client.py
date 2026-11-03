@@ -44,6 +44,7 @@ class OllamaClient:
         self.stream_idle_timeout = max(15.0, float(stream_idle_timeout))
         self.timeout = self.read_timeout  # compatibility attribute
         self.session = requests.Session()
+        self.session.trust_env = False
 
     @staticmethod
     def _set_response_socket_timeout(response: requests.Response, seconds: float) -> bool:
@@ -196,6 +197,7 @@ class OllamaClient:
         cancel_check=None,
         keep_alive: str | int | None = "30m",
         think: bool | None = False,
+        max_tokens: int | None = None,
     ) -> Iterable[str]:
         if not str(model or "").strip():
             raise OllamaError("No Ollama chat model is selected.")
@@ -211,6 +213,10 @@ class OllamaClient:
         }
         if keep_alive is not None:
             body["keep_alive"] = keep_alive
+        if max_tokens is not None:
+            if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not 16 <= max_tokens <= 4096:
+                raise OllamaError("Invalid local generation budget")
+            body["options"]["num_predict"] = max_tokens
         if think is not None:
             body["think"] = bool(think)
         first_payload_seen = False
@@ -274,6 +280,8 @@ class OllamaClient:
                                 yield probe
                                 probe = ""
                     if payload.get("done"):
+                        if payload.get("done_reason") == "length":
+                            raise OllamaError("Local model reached its generation budget; response is incomplete")
                         if probe and not suppress_reasoning:
                             yield probe
                         return
@@ -313,7 +321,7 @@ class OllamaClient:
             "stream": False,
             "format": "json",
             "think": False,
-            "options": {"temperature": float(temperature), "num_ctx": int(num_ctx)},
+            "options": {"temperature": float(temperature), "num_ctx": int(num_ctx), "num_predict": 512},
         }
         if keep_alive is not None:
             body["keep_alive"] = keep_alive

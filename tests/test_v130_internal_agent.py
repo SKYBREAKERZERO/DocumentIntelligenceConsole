@@ -38,7 +38,8 @@ class PlannerUnsafe:
     "DCM 通信后APP按钮的要求",
 ])
 def test_unfinished_names_are_specification_intent(question):
-    assert FastIntentRouter.classify(question).route == "ENGINEERING_AGENT"
+    expected = "SPEC_OUTLINE" if "按目录" in question else "ENGINEERING_AGENT"
+    assert FastIntentRouter.classify(question).route == expected
 
 
 def test_multilingual_term_expansion_preserves_scope_and_identity():

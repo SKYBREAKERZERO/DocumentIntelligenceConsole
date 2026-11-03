@@ -91,15 +91,23 @@ def inspect_local_environment(
         if path.is_symlink() or not path.is_file() or path.stat().st_size > 100_000:
             return False
         with path.open("r", encoding="utf-8") as f:
-            return f.readline().strip().startswith(prefix)
+            return f.readline().strip() in {prefix, prefix + " CN FULL"}
 
     gui = root / "app" / "gui" / "application.py"
-    gui_version_ok = (gui.is_file() and not gui.is_symlink()
-                      and gui.stat().st_size <= 1_000_000
-                      and 'APP_VERSION = "1.30"' in gui.read_text(encoding="utf-8"))
-    metadata_ok = (gui_version_ok
-                   and release_header_ok("README.md", "# DocumentIntelligenceConsole Enterprise v1.30")
-                   and release_header_ok("README-EN.md", "# DocumentIntelligenceConsole Enterprise v1.30"))
+    # Derive one release identity from the actual GUI version constant, then
+    # demand agreement from both release headers. A hardcoded old release string
+    # silently makes this preflight fail on every subsequent genuine release.
+    version = ""
+    if gui.is_file() and not gui.is_symlink() and gui.stat().st_size <= 1_000_000:
+        gui_text = gui.read_text(encoding="utf-8")
+        matches = re.findall(r'^APP_VERSION\s*=\s*"(\d+\.\d+)"\s*$', gui_text, re.M)
+        if len(matches) == 1:
+            version = matches[0]
+    metadata_ok = bool(
+        version
+        and release_header_ok("README.md", f"# DocumentIntelligenceConsole Enterprise v{version}")
+        and release_header_ok("README-EN.md", f"# DocumentIntelligenceConsole Enterprise v{version}")
+    )
     fixture = root / "input" / "test.pdf"
     legacy_fixture_present = fixture.is_file() and not fixture.is_symlink()
     loader_test = root / "tests" / "test_loader.py"
@@ -121,6 +129,7 @@ def inspect_local_environment(
         "checks": checks,
         "missing_core_file_count": len(missing_files),
         "version_consistent": metadata_ok,
+        "release_version": version if metadata_ok else "",
         "missing_core_files": missing_files,
         "missing_internal_import_count": len(missing_imports),
         # Don't copy absolute filesystem paths or module source into the report.
@@ -209,7 +218,7 @@ def build_release_readiness(local: dict[str, Any], evidence: dict[str, Any]) -> 
     }
     blocked = [k for k in ("source_package", "release_metadata", "internal_imports", "dependencies",
                            "legacy_test_fixture") if checks[k] == "BLOCKED"]
-    return {"schema": "stage1-release-acceptance-v1", "release": "v1.30",
+    return {"schema": "stage1-release-acceptance-v1", "release": f"v{local.get('release_version') or 'UNVERIFIED'}",
             "local_preflight": local, "evidence_review": evidence,
             "acceptance_checks": checks,
             "local_preflight_blocked_checks": blocked,

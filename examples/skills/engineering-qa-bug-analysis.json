@@ -1,0 +1,14 @@
+{
+  "bug": {
+    "record_type": "BUG",
+    "issue_key": "AUDIO-123",
+    "summary": "Bluetooth audio delayed after ignition",
+    "phenomenon": "Bluetooth audio delayed after ignition",
+    "repro_steps": "Ignition ON",
+    "expected_result": "Audio ready within 500ms",
+    "actual_result": "Bluetooth audio delayed",
+    "affected_version": "SW-X",
+    "software_version": "SW-X"
+  },
+  "units": []
+}

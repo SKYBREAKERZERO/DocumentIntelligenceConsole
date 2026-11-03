@@ -1,0 +1,14 @@
+{
+  "name": "spec-version-impact",
+  "stage": "Stage 3",
+  "capability": "VERSION_TEXT_MAPPING_ONLY",
+  "input_keys": [
+    "old",
+    "new"
+  ],
+  "auto_execution": false,
+  "runtime": "bounded_python_tool",
+  "network": "OFF",
+  "database_write": false,
+  "production_acceptance": "NOT_ASSESSED"
+}

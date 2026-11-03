@@ -1,0 +1,28 @@
+{
+  "source": {
+    "project": "21MM",
+    "document_id": "doc508",
+    "file_name": "Media Controller function spec.pdf",
+    "document_role": "SPEC_BODY",
+    "source_document": "doc508",
+    "source_text": "Refer to spec 550 section 4.1 for Bluetooth requirements.",
+    "source_chunk": "Refer to spec 550 section 4.1 for Bluetooth requirements.",
+    "source_start": 0,
+    "source_end": 57,
+    "source_hash": "58c2deb8735601fd91bef611d6df1abd8314197cb377ec2b39494e229e5e0880"
+  },
+  "target": {
+    "project": "21MM",
+    "document_id": "doc550",
+    "file_name": "Bluetooth Audio function spec v2.52.pdf",
+    "document_role": "SPEC_BODY",
+    "target_document": "doc550",
+    "target_code": "550",
+    "target_section": "4.1",
+    "target_text": "Bluetooth audio shall be ready within 500ms.",
+    "target_chunk": "Bluetooth audio shall be ready within 500ms.",
+    "target_start": 0,
+    "target_end": 44,
+    "target_hash": "1e3215a0657364d8217a0a0cb3134e5aca8bc382d90fd826c1aab92845fa9639"
+  }
+}

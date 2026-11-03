@@ -1,0 +1,82 @@
+{
+  "file_name": "990101_SYNTHETIC_Bluetooth_Audio_Ver1.00.pdf",
+  "file_type": "PDF",
+  "chapters": [
+    {
+      "id": "2",
+      "title_en": "Bluetooth Audio",
+      "page_number": 2
+    }
+  ],
+  "sections": [
+    {
+      "id": "2.1",
+      "chapter_id": "2",
+      "title_en": "Ignition OFF response",
+      "page_number": 2
+    },
+    {
+      "id": "2.2",
+      "chapter_id": "2",
+      "title_en": "Reception loss",
+      "page_number": 3
+    },
+    {
+      "id": "2.4",
+      "chapter_id": "2",
+      "title_en": "Legacy pairing",
+      "page_number": 4
+    },
+    {
+      "id": "2.5",
+      "chapter_id": "2",
+      "title_en": "Related audio routing",
+      "page_number": 5
+    }
+  ],
+  "contents": [
+    {
+      "chapter_id": "2",
+      "section_id": "2.1",
+      "page_number": 2,
+      "text": "The controller shall stop Bluetooth playback within 500 ms after ignition becomes OFF, unless an emergency call is active.",
+      "chunk_index": 0,
+      "token_count": 19
+    },
+    {
+      "chapter_id": "2",
+      "section_id": "2.2",
+      "page_number": 3,
+      "text": "When reception is lost, Bluetooth audio may be silent, but Bluetooth Audio mode shall remain active. If reception recovers within 3 seconds, playback shall resume automatically.",
+      "chunk_index": 0,
+      "token_count": 26
+    },
+    {
+      "chapter_id": "2",
+      "section_id": "2.4",
+      "page_number": 4,
+      "text": "The legacy PIN pairing prompt shall appear before Bluetooth playback starts.",
+      "chunk_index": 0,
+      "token_count": 11
+    },
+    {
+      "chapter_id": "2",
+      "section_id": "2.5",
+      "page_number": 5,
+      "text": "See specification 990201 section 3.1 for emergency call audio priority.",
+      "chunk_index": 0,
+      "token_count": 10
+    }
+  ],
+  "metadata": {
+    "project_code": "21MM",
+    "project_name": "Synthetic Acceptance 21MM",
+    "project_assignment_source": "USER_SELECTED",
+    "region_scope": "JP",
+    "document_role": "SPEC_BODY",
+    "artifact_type": "SPEC_BODY",
+    "acceptance_fixture": "SYNTHETIC_ONLY",
+    "synthetic_suite": "typical-enterprise-v1",
+    "specification_code_override": "990101"
+  }
+}

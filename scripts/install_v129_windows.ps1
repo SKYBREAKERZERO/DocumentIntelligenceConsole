@@ -7,7 +7,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 is required.' }
 & py -3.12 -m venv .venv
 if ($LASTEXITCODE -ne 0) { throw 'Virtual environment creation failed.' }
 $python = Join-Path $root '.venv\Scripts\python.exe'
-& $python -m pip install -r (Join-Path $root 'requirements.txt')
+& $python -m pip install -r (Join-Path $root 'requirements.txt') -r (Join-Path $root 'requirements-api.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed. Review pip output; no partial success claimed.' }
 & $python -m pip check
 if ($LASTEXITCODE -ne 0) { throw 'Dependency conflict detected by pip check.' }
