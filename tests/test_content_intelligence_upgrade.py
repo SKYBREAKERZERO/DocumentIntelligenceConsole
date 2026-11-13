@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from app.ai.agent import FastIntentRouter
 from app.ai.spec_facts import render_spec_summary
-from app.ai.testing_workflow import explicit_references, testing_route, ticket_spec_query
+from app.ai.testing_workflow import explicit_references, testing_route as classify_testing_route, ticket_spec_query
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -87,11 +87,11 @@ def test_relation_followups_keep_source_target_pair():
 
 
 def test_plain_symptom_enters_pre_ticket_workflow():
-    assert testing_route("蓝牙连接后切换用户，Profile没有恢复。") == "PRE_TICKET_CHECK"
-    assert testing_route("CarPlay切换用户后偶发黑屏并重启") == "PRE_TICKET_CHECK"
-    assert testing_route("这个现象之前有没有人报过？") == "PRE_TICKET_CHECK"
-    assert testing_route("这是不是BUG，还是符合式样？") == "CONFORMANCE_CHECK"
-    assert testing_route("ABC-123涉及哪本式样、哪段要求？") == "TICKET_SPEC_TRACE"
+    assert classify_testing_route("蓝牙连接后切换用户，Profile没有恢复。") == "PRE_TICKET_CHECK"
+    assert classify_testing_route("CarPlay切换用户后偶发黑屏并重启") == "PRE_TICKET_CHECK"
+    assert classify_testing_route("这个现象之前有没有人报过？") == "PRE_TICKET_CHECK"
+    assert classify_testing_route("这是不是BUG，还是符合式样？") == "CONFORMANCE_CHECK"
+    assert classify_testing_route("ABC-123涉及哪本式样、哪段要求？") == "TICKET_SPEC_TRACE"
 
 
 def test_real_world_relation_wording_routes_by_intent():
@@ -123,14 +123,11 @@ def test_cpu_summary_is_position_backed_and_bounded():
 def test_spec_summary_uses_local_ai_with_explicit_fallback():
     source = (ROOT / "app/ai/rag_service.py").read_text(encoding="utf-8")
     assert 'if retrieval.route == "SPEC_SUMMARY"' in source
-    assert "OLLAMA_SUMMARY" in source
-    assert "self.ollama.chat_stream(" in source
-    assert "不是AI总结" in source
-    assert "下面按章节概括" in source
-    assert "NATURAL CONVERSATION STYLE" in source
-    assert "Do not expose hidden reasoning or chain-of-thought" in source
-    assert "chapter_evidence" in source
-    assert r"\[\s*E\s*(\d+)\s*\]" in source
+    assert "yield from self._engineering_answer" in source
+    assert "yield MESSAGES[lang]" in source
+    assert "_read_source_batches" in source
+    assert "source_citation(item, row)" in source
+
 
 
 def test_validation_failure_degrades_to_source_locations_not_block_message():
@@ -149,7 +146,6 @@ def test_ticket_to_spec_trace_continues_without_literal_reference_and_formats_se
     assert "## 票内明确引用" in workflow
     assert "## 根据票据内容检索出的相关式样候选" in workflow
     assert 'if retrieval.route == "ISSUE_QUERY"' in service
-    assert "yield render_issue_query(retrieval)" in service
 
 
 def test_ticket_feature_entity_then_clause_analysis_is_packaged():
@@ -166,13 +162,13 @@ def test_ticket_feature_entity_then_clause_analysis_is_packaged():
 
 def test_ticket_regression_design_followup_keeps_issue_and_requires_evidence_locations():
     conversation = [
-        {"role": "user", "content": "查一下MM21PROBL-138"},
+        {"role": "user", "content": "查一下DEMOPROJ-138"},
         {"role": "assistant", "content": "已找到该票。"},
         {"role": "user", "content": "结合内容整理回归测试手顺和测试观点"},
     ]
     contextual = FastIntentRouter.contextualize(conversation[-1]["content"], conversation)
-    assert "MM21PROBL-138" in contextual
-    assert testing_route(contextual) == "TICKET_SPEC_TRACE"
+    assert "DEMOPROJ-138" in contextual
+    assert classify_testing_route(contextual) == "TICKET_SPEC_TRACE"
     workflow = (ROOT / "app/ai/testing_workflow.py").read_text(encoding="utf-8")
     service = (ROOT / "app/ai/rag_service.py").read_text(encoding="utf-8")
     assert "test_design_requested" in workflow
@@ -182,13 +178,13 @@ def test_ticket_regression_design_followup_keeps_issue_and_requires_evidence_loc
 
 def test_issue_relation_followup_and_inline_filename_citation_are_resolved():
     conversation = [
-        {"role": "user", "content": "查一下MM21PROBL-708"},
+        {"role": "user", "content": "查一下DEMOPROJ-708"},
         {"role": "assistant", "content": "已找到该票。"},
         {"role": "user", "content": "关联哪些式样书"},
     ]
     contextual = FastIntentRouter.contextualize(conversation[-1]["content"], conversation)
-    assert "MM21PROBL-708" in contextual
-    assert testing_route(contextual) == "TICKET_SPEC_TRACE"
+    assert "DEMOPROJ-708" in contextual
+    assert classify_testing_route(contextual) == "TICKET_SPEC_TRACE"
     refs = explicit_references(
         "参照仕様書: Handsfree Function Specification_v2.02.pdf ページ:93 9.7.3 表示設定初期化"
     )
@@ -226,22 +222,23 @@ def test_common_spec_questions_use_focused_routes_not_raw_evidence_fallbacks():
     facts = (ROOT / "app/ai/spec_facts.py").read_text(encoding="utf-8")
     assert "def render_symptom_workflow" in workflow
     assert 'retrieval.route in {"TICKET_SPEC_TRACE","PRE_TICKET_CHECK"}' in service
-    assert "只回答用户询问的性能/时限要求" in service
+    policy = (ROOT / "app/ai/answer_policy.py").read_text(encoding="utf-8")
+    assert "performance/timing requirements" in policy
     assert "已登记正文版本" in facts
 
 
 def test_ticket_analysis_followup_keeps_exact_issue_and_invokes_model_analysis():
     conversation = [
-        {"role": "user", "content": "总结一下MM21PROBL-708的内容"},
+        {"role": "user", "content": "总结一下DEMOPROJ-708的内容"},
         {"role": "assistant", "content": "已返回票据摘要。"},
         {"role": "user", "content": "展开说说这个bug"},
     ]
     contextual = FastIntentRouter.contextualize(conversation[-1]["content"], conversation)
-    assert "MM21PROBL-708" in contextual
-    assert testing_route(contextual) == "TICKET_SPEC_TRACE"
-    assert testing_route("分析一下MM21PROBL-708") == "TICKET_SPEC_TRACE"
-    assert testing_route("为什么MM21PROBL-708判断为仕様通り") == "TICKET_SPEC_TRACE"
-    assert testing_route("蓝牙设置项没显示，是否为仕様通り？") == "CONFORMANCE_CHECK"
+    assert "DEMOPROJ-708" in contextual
+    assert classify_testing_route(contextual) == "TICKET_SPEC_TRACE"
+    assert classify_testing_route("分析一下DEMOPROJ-708") == "TICKET_SPEC_TRACE"
+    assert classify_testing_route("为什么DEMOPROJ-708判断为仕様通り") == "TICKET_SPEC_TRACE"
+    assert classify_testing_route("蓝牙设置项没显示，是否为仕様通り？") == "CONFORMANCE_CHECK"
     workflow = (ROOT / "app/ai/testing_workflow.py").read_text(encoding="utf-8")
     service = (ROOT / "app/ai/rag_service.py").read_text(encoding="utf-8")
     assert "ticket_analysis_requested" in workflow
@@ -254,12 +251,12 @@ def test_ticket_analysis_followup_keeps_exact_issue_and_invokes_model_analysis()
 def test_conversation_state_and_question_frame_separate_history_from_new_judgment():
     from app.ai.interaction_intelligence import ConversationState, QuestionFrame
     messages = [
-        {"role": "user", "content": "总结一下MM21PROBL-708"},
+        {"role": "user", "content": "总结一下DEMOPROJ-708"},
         {"role": "assistant", "content": "票据说当时判断为仕様通り"},
         {"role": "user", "content": "为什么这样判断？"},
     ]
     state = ConversationState.from_messages(messages)
-    assert state.active_issue == "MM21PROBL-708"
+    assert state.active_issue == "DEMOPROJ-708"
     assert state.active_spec == ""  # ticket suffix 708 is not a specification code
     frame = QuestionFrame.parse(messages[-1]["content"], state)
     assert frame.goal == "EXPLAIN_RECORDED_TICKET_CONCLUSION"

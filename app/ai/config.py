@@ -38,6 +38,8 @@ class AISettings:
     settings_schema_version: int = 2
     ollama_url: str = "http://127.0.0.1:11434"
     chat_model: str = ""
+    inference_provider: str = "ollama"
+    inference_ca_bundle: str = ""
     temperature: float = 0.2
     num_ctx: int = 4096
     top_k: int = 12

@@ -1280,11 +1280,11 @@ class EnterpriseRetriever:
             evidence_strength=('STRONG' if any(x.source_type == 'SPEC_OUTLINE' for x in rows)
                                else 'LIMITED' if rows else 'NONE'))
 
-    def retrieve_spec_chapter_content(self, question: str, *, scope: str = 'AUTO', current_scope: str = '') -> RetrievalResult:
+    def retrieve_spec_chapter_content(self, question: str, *, scope: str = 'AUTO', current_scope: str = '', focus_terms: tuple[str, ...] = ()) -> RetrievalResult:
         from app.ai.spec_facts import lookup_chapter_content
         scopes = self._factual_spec_scopes(scope, question, current_scope)
         started = time.perf_counter()
-        rows, warnings = lookup_chapter_content(self, question, scopes)
+        rows, warnings = lookup_chapter_content(self, question, scopes, focus_terms=focus_terms)
         elapsed = int((time.perf_counter() - started) * 1000)
         return RetrievalResult(evidence=tuple(rows), resolved_scopes=scopes,
             sql_ms=elapsed, warnings=tuple(warnings), plan_source='structured-fast-path',
@@ -1522,6 +1522,10 @@ class EnterpriseRetriever:
         if semantic_allowed:
             sem_started = time.perf_counter()
             try:
+                if scopes == ("QABUG",):
+                    collection = self.collections.get("QABUG")
+                    if not collection or not self._collection_exists(self._get_qdrant_client(), collection):
+                        raise RuntimeError("QA/BUG semantic collection unavailable")
                 semantic_items = self._semantic_search(
                     semantic_query,
                     scopes,
@@ -2330,9 +2334,12 @@ class EnterpriseRetriever:
         if tokens:
             token_clauses=[]
             for token in tokens[:5]:
-                token_clauses.append("(COALESCE(r.summary,'') ILIKE %s OR COALESCE(r.description,'') ILIKE %s OR COALESCE(r.normalized_fields::text,'') ILIKE %s)")
+                token_clauses.append(
+                    "(COALESCE(r.summary,'') ILIKE %s OR COALESCE(r.description,'') ILIKE %s "
+                    "OR COALESCE(r.normalized_fields::text,'') ILIKE %s "
+                    "OR COALESCE(b.phenomenon,'') ILIKE %s OR COALESCE(q.actual_behavior,'') ILIKE %s)")
                 value=f"%{token}%"
-                params.extend([value,value,value])
+                params.extend([value] * 5)
             clauses.append("("+" OR ".join(token_clauses)+")")
         return " AND ".join(clauses), params
 

@@ -421,7 +421,7 @@ def lookup_outline(retriever: "EnterpriseRetriever", question: str, scopes: tupl
 
 
 def lookup_chapter_content(retriever: "EnterpriseRetriever", question: str,
-                           scopes: tuple[str, ...]) -> tuple[list["EvidenceItem"], list[str]]:
+                           scopes: tuple[str, ...], *, focus_terms: tuple[str, ...] = ()) -> tuple[list["EvidenceItem"], list[str]]:
     """Read bounded, verbatim physical-PDF content from PostgreSQL.
 
     The result is labelled extractive evidence, *not* an LLM-created abstract.
@@ -450,6 +450,10 @@ def lookup_chapter_content(retriever: "EnterpriseRetriever", question: str,
                       )
                     """
                     section_params = [requested_section, requested_section, requested_section + '.%']
+                if focus_terms:
+                    matches = " OR ".join("strpos(lower(c.content), lower(%s)) > 0" for _ in focus_terms)
+                    section_filter += f" AND ({matches})"
+                    section_params.extend(focus_terms)
                 cur.execute(f"""
                     WITH ranked AS (
                         SELECT c.chapter_id, c.section_id, c.page_number,
@@ -473,8 +477,8 @@ def lookup_chapter_content(retriever: "EnterpriseRetriever", question: str,
                            content AS excerpt, title,
                            FALSE AS excerpt_truncated
                     FROM ranked WHERE chapter_rank <= %s
-                    ORDER BY chapter_key, chapter_rank LIMIT 300
-                """, (item.document_id, *section_params, 40))
+                    ORDER BY chapter_key, chapter_rank LIMIT %s
+                """, (item.document_id, *section_params, 40, 32 if focus_terms else 300))
                 excerpts = [dict(r) for r in cur.fetchall()]
             result.append(EvidenceItem(
                 evidence_id='', scope=item.scope, source_type='SPEC_CHAPTER_CONTENT',

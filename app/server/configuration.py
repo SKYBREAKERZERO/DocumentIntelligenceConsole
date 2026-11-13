@@ -101,6 +101,14 @@ def load_settings(config_dir: Path) -> AISettings:
     require_local_url(settings.ollama_url, label="Ollama")
     require_local_url(settings.external_webui_url, label="Open WebUI")
     require_local_host(settings.api_host)
+    from app.ai.approved_inference import load_profile
+    private = load_profile(config_dir)
+    if private:
+        settings.inference_provider = "approved_openai"
+        settings.chat_model = private["model"].strip()
+        settings.inference_ca_bundle = private.get("ca_bundle", "")
+    else:
+        settings.inference_provider = "ollama"
     return settings
 
 

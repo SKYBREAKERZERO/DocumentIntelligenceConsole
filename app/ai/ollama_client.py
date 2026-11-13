@@ -305,6 +305,8 @@ class OllamaClient:
         temperature: float = 0.0,
         num_ctx: int = 4096,
         keep_alive: str | int | None = "30m",
+        schema: dict[str, Any] | None = None,
+        max_tokens: int = 512,
     ) -> dict[str, Any]:
         """Request a strict JSON response for planning/classification.
 
@@ -319,9 +321,9 @@ class OllamaClient:
             "model": str(model).strip(),
             "messages": normalized_messages,
             "stream": False,
-            "format": "json",
+            "format": schema if schema is not None else "json",
             "think": False,
-            "options": {"temperature": float(temperature), "num_ctx": int(num_ctx), "num_predict": 512},
+            "options": {"temperature": float(temperature), "num_ctx": int(num_ctx), "num_predict": max_tokens},
         }
         if keep_alive is not None:
             body["keep_alive"] = keep_alive

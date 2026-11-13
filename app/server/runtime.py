@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import copy
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ class PersistentRAGRuntime:
         self.settings = load_settings(self.config_dir)
         self.profiles, self.password, self.qdrant, self.qdrant_key = load_profiles(self.config_dir)
         self._instance: EnterpriseRAGService | None = None
+        self._spec_instance: EnterpriseRAGService | None = None
         self._lock = threading.RLock()
         self._warmup_state = "NOT_STARTED"
         self._warmup_error = ""
@@ -37,6 +39,40 @@ class PersistentRAGRuntime:
                 )
             return self._instance
 
+    def reload_inference(self):
+        from app.ai.approved_inference import make_client
+        settings = load_settings(self.config_dir)
+        client = make_client(settings)
+        with self._lock:
+            if self._instance is not None:
+                # Existing requests retain the old service/model snapshot;
+                # new requests reuse the already loaded embedding retriever.
+                updated = copy.copy(self._instance)
+                updated.settings = settings
+                updated.ollama = client
+                updated.agent = copy.copy(self._instance.agent)
+                updated.agent.ollama = client
+                self._instance = updated
+            self.settings = settings
+        return {"status":"APPLIED", "provider":settings.inference_provider,
+                "model":settings.chat_model}
+
+    @property
+    def spec_preferred_model(self) -> str:
+        from app.ai.spec_query import load_spec_settings
+        return load_spec_settings(self.config_dir, self.settings).chat_model
+
+    def get_spec_service(self):
+        from app.ai.spec_query import load_spec_settings, SpecificationQueryService
+        with self._lock:
+            if self._spec_instance is None:
+                self._spec_instance = SpecificationQueryService(
+                    settings=load_spec_settings(self.config_dir, self.settings),
+                    postgres_profiles=self.profiles, postgres_password=self.password,
+                    qdrant_profile=self.qdrant, qdrant_api_key=self.qdrant_key,
+                )
+            return self._spec_instance
+
     def warmup_async(self) -> None:
         if self._warmup_state != "NOT_STARTED":
             return
@@ -55,7 +91,8 @@ class PersistentRAGRuntime:
     def local_status(self) -> dict[str, Any]:
         return {
             "service": "DocumentIntelligenceConsole",
-            "mode": "LOCAL_ONLY",
+            "mode": "APPROVED_REMOTE_INFERENCE" if getattr(self.settings,"inference_provider","ollama")=="approved_openai" else "LOCAL_ONLY",
+            "inference_provider":getattr(self.settings,"inference_provider","ollama"),
             "embedding_model": self.settings.embedding_model,
             "vector_dimension": self.settings.vector_dimension,
             "preferred_model": self.preferred_model or "NOT_CONFIGURED",
@@ -86,7 +123,7 @@ class PersistentRAGRuntime:
                     states["PostgreSQL"] = "ONLINE" if cur.fetchone()[0] == 1 else "ERROR"
         except Exception:
             states["PostgreSQL"] = "OFFLINE"
-        return {"mode": "LOCAL_ONLY", "dependencies": states, "runtime": self.local_status()}
+        return {"mode": self.local_status()["mode"], "dependencies": states, "runtime": self.local_status()}
 
     def probe_internal_knowledge(self) -> dict[str, Any]:
         """Authenticated read-only live probe: never invent corpus availability.

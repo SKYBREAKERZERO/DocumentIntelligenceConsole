@@ -347,7 +347,7 @@ class FastIntentRouter:
                           for t in reversed(prior[-12:])]
                 chosen_scope = next((m.group(1).upper() for m in scopes if m), '')
                 return f"{current} {chosen_scope} {document}".strip()
-        if not cls._FOLLOWUP_HINT.search(current):
+        if not cls._FOLLOWUP_HINT.search(current) and not re.search(r"process|workflow|steps|summari[sz]e|summary|analy[sz]e|手順|フロー|流れ|要約|説明", current, re.I):
             return current
         if cls._ISSUE_KEY.search(current) or re.search(r"(?:SPEC[-_: ]*)\d{3,6}", current, re.I):
             return current
@@ -494,7 +494,7 @@ class FastIntentRouter:
             )
         )
         engineering_detail = bool(re.search(
-            r"(?:流程|步骤|步驟|内容|內容|功能|機能|要求|要件|条款|條款|章节|章節|页码|頁碼|"
+            r"(?:process|workflow|steps|手順|フロー|流れ|summari[sz]e|summary|analy[sz]e|要約|説明|流程|步骤|步驟|内容|內容|功能|機能|要求|要件|条款|條款|章节|章節|页码|頁碼|"
             r"展开|展開|继续|繼續|详细|詳細|具体|具體|说说|說說|介绍|介紹|"
             r"分析|总结|總結|概括|归纳|歸納|梳理|变动|變動|改动|改動|区别|區別|差异|差異|对比|對比|变更|變更|修改|关联|關聯|关系|關係|"
             r"引用|参照|參照|参考|參考|reference|references|依赖|依賴|dependency|dependencies|"
@@ -567,7 +567,7 @@ class FastIntentRouter:
                 "SPEC",
             )
         if spec_codes and re.search(
-            r"(?:流程|步骤|步驟|如何|怎么|怎麼|总结|總結|概括|归纳|歸納|分析|说明|說明|介绍|介紹|说说|說說|按章(?:节|節)?展开|按章(?:节|節)?展開|主要解决什么|主要解決什麼|业务问题|業務問題)",
+            r"(?:process|workflow|steps|手順|フロー|流れ|summari[sz]e|summary|analy[sz]e|要約|分析|説明|流程|步骤|步驟|如何|怎么|怎麼|总结|總結|概括|归纳|歸納|分析|说明|說明|介绍|介紹|说说|說說|按章(?:节|節)?展开|按章(?:节|節)?展開|主要解决什么|主要解決什麼|业务问题|業務問題)",
             value,
             re.I,
         ) and not re.search(r"(?:给出|显示|查看|展开|展開).{0,8}(?:原文|片段|逐字)", value, re.I):

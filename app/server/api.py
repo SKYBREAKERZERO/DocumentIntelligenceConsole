@@ -21,6 +21,8 @@ from app.server.runtime import PersistentRAGRuntime
 from app.server.resilience import AdmissionController
 
 
+from app.ai.spec_query import MODEL_ID as SPEC_MODEL_ID
+
 MODEL_ID = "document-intelligence-rag"
 MAX_BODY = 2 * 1024 * 1024
 LOGGER = logging.getLogger("dic.backend")
@@ -88,6 +90,7 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
     app.state.runtime = runtime
     admissions = AdmissionController(max_active_chats if max_active_chats is not None else configured_chat_limit())
     factual_admissions = AdmissionController(2)
+    spec_admissions = AdmissionController(1)
     app.state.chat_admissions = admissions
     app.state.factual_admissions = factual_admissions
 
@@ -153,8 +156,18 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
     @app.get("/v1/models")
     def models(_: None = Depends(require_auth)):
         return {"object": "list", "data": [
-            {"id": MODEL_ID, "object": "model", "created": int(time.time()), "owned_by": "document-intelligence-local"}
+            {"id": MODEL_ID, "object": "model", "created": int(time.time()), "owned_by": "document-intelligence-local"},
+            {"id": SPEC_MODEL_ID, "object": "model", "created": int(time.time()), "owned_by": "document-intelligence-local"}
         ]}
+
+    @app.post("/api/v1/inference/reload")
+    def reload_inference(_: None = Depends(require_auth)):
+        # No endpoint or credentials accepted over this API. They come only
+        # from the local profile and operating-system credential store.
+        try:
+            return runtime.reload_inference()
+        except Exception:
+            raise HTTPException(503,"Private inference configuration could not be applied") from None
 
     @app.get("/api/v1/services")
     def services(_: None = Depends(require_auth)):
@@ -414,10 +427,11 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
 
     @app.post("/v1/chat/completions")
     def completions(body: CompletionInput, _: None = Depends(require_auth)):
-        if body.model != MODEL_ID:
+        is_spec = body.model == SPEC_MODEL_ID
+        if body.model not in {MODEL_ID, SPEC_MODEL_ID}:
             raise HTTPException(status_code=400, detail="Use the local RAG model identifier")
         supported_scopes = {"AUTO", "21MM", "24MM", "COMMON", "QABUG", "QA/BUG", "ALL", "21MM + COMMON", "24MM + COMMON"}
-        if body.scope not in supported_scopes:
+        if body.scope not in supported_scopes or (is_spec and body.scope in {"QABUG", "QA/BUG"}):
             raise HTTPException(status_code=400, detail="Invalid knowledge scope")
         messages = []
         for item in body.messages:
@@ -440,15 +454,20 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
         # Ollama generations occupy the model lane. Both remain bounded.
         from app.ai.agent import FastIntentRouter
         last_user = next((x['content'] for x in reversed(messages) if x['role']=='user'), '')
-        classification = FastIntentRouter.classify(
-            FastIntentRouter.contextualize(last_user, messages)
+        from app.ai.agent import FastRouteDecision
+        classification = (
+            FastRouteDecision("SPEC_QUERY", "dedicated specification task", domain="SPEC")
+            if is_spec else FastIntentRouter.classify(
+                FastIntentRouter.contextualize(last_user, messages))
         )
         structured_routes = {'SPEC_CATALOG', 'SPEC_LOOKUP', 'SPEC_OUTLINE',
                              'SPEC_CHAPTER_CONTENT', 'SPEC_SUMMARY', 'SPEC_VERSION_FACTS', 'SPEC_RELATIONS',
                              'PRE_TICKET_CHECK','TICKET_SPEC_TRACE','CONFORMANCE_CHECK'}
-        if classification.route not in structured_routes and not runtime.preferred_model:
+        preferred_model = runtime.spec_preferred_model if is_spec else runtime.preferred_model
+        if classification.route not in structured_routes and not preferred_model:
             raise HTTPException(status_code=503, detail="Configure a local Ollama model in AI / RAG settings first")
-        selected_admissions = factual_admissions if classification.route in structured_routes else admissions
+        selected_admissions = (spec_admissions if is_spec else
+                               factual_admissions if classification.route in structured_routes else admissions)
         lease = selected_admissions.acquire()
         if lease is None:
             raise HTTPException(
@@ -456,11 +475,11 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
                 headers={"Retry-After": "3"},
             )
         try:
-            service = runtime.get_service()
+            service = runtime.get_spec_service() if is_spec else runtime.get_service()
         except Exception:
             lease.release(failed=True)
             raise
-        model = runtime.preferred_model
+        model = getattr(getattr(service,"settings",None),"chat_model","") or preferred_model
         cid = "chatcmpl-" + uuid.uuid4().hex
         created = int(time.time())
         scope = body.scope
@@ -474,7 +493,7 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
             else:
                 lease.release()
             return {
-                "id": cid, "object": "chat.completion", "created": created, "model": MODEL_ID,
+                "id": cid, "object": "chat.completion", "created": created, "model": body.model,
                 "choices": [{"index": 0, "message": {"role": "assistant", "content": answer}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
                 "rag": {
@@ -488,12 +507,12 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
         def emit():
             captured=[]
             try:
-                yield "data: " + json.dumps({"id": cid, "object": "chat.completion.chunk", "created": created, "model": MODEL_ID, "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]}, ensure_ascii=False) + "\n\n"
+                yield "data: " + json.dumps({"id": cid, "object": "chat.completion.chunk", "created": created, "model": body.model, "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]}, ensure_ascii=False) + "\n\n"
                 callbacks={"on_retrieval":captured.append} if classification.route in {"PRE_TICKET_CHECK","TICKET_SPEC_TRACE","CONFORMANCE_CHECK"} else {}
                 for chunk in service.answer_stream(messages, model=model, scope=scope, current_scope="",**callbacks):
-                    packet = {"id": cid, "object": "chat.completion.chunk", "created": created, "model": MODEL_ID, "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}]}
+                    packet = {"id": cid, "object": "chat.completion.chunk", "created": created, "model": body.model, "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}]}
                     yield "data: " + json.dumps(packet, ensure_ascii=False) + "\n\n"
-                final={"id": cid, "object": "chat.completion.chunk", "created": created, "model": MODEL_ID, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+                final={"id": cid, "object": "chat.completion.chunk", "created": created, "model": body.model, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
                 if captured and captured[-1].workflow:
                     final["rag"]={"route":captured[-1].route,"workflow":captured[-1].workflow}
                 yield "data: " + json.dumps(final) + "\n\n"
@@ -503,7 +522,7 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
                 # Never leak traceback, credentials, or retrieved content to clients.
                 yield "data: " + json.dumps({
                     "id": cid, "object": "chat.completion.chunk", "created": created,
-                    "model": MODEL_ID, "choices": [{"index": 0,
+                    "model": body.model, "choices": [{"index": 0,
                     "delta": {"content": "\n[Local RAG error: response incomplete. Check backend logs.]"},
                     "finish_reason": None}],
                 }) + "\n\n"
