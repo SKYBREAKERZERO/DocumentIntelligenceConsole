@@ -22,6 +22,8 @@ from app.server.resilience import AdmissionController
 
 
 from app.ai.spec_query import MODEL_ID as SPEC_MODEL_ID
+from app.ai.test_design import MODEL_ID as TEST_DESIGN_MODEL_ID
+from app.ai.bug_trends import MODEL_ID as BUG_TREND_MODEL_ID
 
 MODEL_ID = "document-intelligence-rag"
 MAX_BODY = 2 * 1024 * 1024
@@ -91,6 +93,7 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
     admissions = AdmissionController(max_active_chats if max_active_chats is not None else configured_chat_limit())
     factual_admissions = AdmissionController(2)
     spec_admissions = AdmissionController(1)
+    test_design_admissions = AdmissionController(1)
     app.state.chat_admissions = admissions
     app.state.factual_admissions = factual_admissions
 
@@ -157,7 +160,9 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
     def models(_: None = Depends(require_auth)):
         return {"object": "list", "data": [
             {"id": MODEL_ID, "object": "model", "created": int(time.time()), "owned_by": "document-intelligence-local"},
-            {"id": SPEC_MODEL_ID, "object": "model", "created": int(time.time()), "owned_by": "document-intelligence-local"}
+            {"id": SPEC_MODEL_ID, "object": "model", "created": int(time.time()), "owned_by": "document-intelligence-local"},
+            {"id": TEST_DESIGN_MODEL_ID, "object": "model", "created": int(time.time()), "owned_by": "document-intelligence-local"},
+            {"id": BUG_TREND_MODEL_ID, "object": "model", "created": int(time.time()), "owned_by": "document-intelligence-local"},
         ]}
 
     @app.post("/api/v1/inference/reload")
@@ -428,10 +433,13 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
     @app.post("/v1/chat/completions")
     def completions(body: CompletionInput, _: None = Depends(require_auth)):
         is_spec = body.model == SPEC_MODEL_ID
-        if body.model not in {MODEL_ID, SPEC_MODEL_ID}:
+        is_test_design = body.model == TEST_DESIGN_MODEL_ID
+        is_bug_trend = body.model == BUG_TREND_MODEL_ID
+        if body.model not in {MODEL_ID, SPEC_MODEL_ID, TEST_DESIGN_MODEL_ID, BUG_TREND_MODEL_ID}:
             raise HTTPException(status_code=400, detail="Use the local RAG model identifier")
         supported_scopes = {"AUTO", "21MM", "24MM", "COMMON", "QABUG", "QA/BUG", "ALL", "21MM + COMMON", "24MM + COMMON"}
-        if body.scope not in supported_scopes or (is_spec and body.scope in {"QABUG", "QA/BUG"}):
+        if (body.scope not in supported_scopes or (is_spec and body.scope in {"QABUG", "QA/BUG"})
+                or (is_bug_trend and body.scope not in {"AUTO", "QABUG", "QA/BUG", "ALL"})):
             raise HTTPException(status_code=400, detail="Invalid knowledge scope")
         messages = []
         for item in body.messages:
@@ -456,17 +464,19 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
         last_user = next((x['content'] for x in reversed(messages) if x['role']=='user'), '')
         from app.ai.agent import FastRouteDecision
         classification = (
+            FastRouteDecision("BUG_TRENDS", "dedicated BUG register report") if is_bug_trend else
+            FastRouteDecision("TEST_DESIGN", "dedicated test design task") if is_test_design else
             FastRouteDecision("SPEC_QUERY", "dedicated specification task", domain="SPEC")
             if is_spec else FastIntentRouter.classify(
                 FastIntentRouter.contextualize(last_user, messages))
         )
         structured_routes = {'SPEC_CATALOG', 'SPEC_LOOKUP', 'SPEC_OUTLINE',
                              'SPEC_CHAPTER_CONTENT', 'SPEC_SUMMARY', 'SPEC_VERSION_FACTS', 'SPEC_RELATIONS',
-                             'PRE_TICKET_CHECK','TICKET_SPEC_TRACE','CONFORMANCE_CHECK'}
-        preferred_model = runtime.spec_preferred_model if is_spec else runtime.preferred_model
-        if classification.route not in structured_routes and not preferred_model:
+                             'PRE_TICKET_CHECK','TICKET_SPEC_TRACE','CONFORMANCE_CHECK','BUG_TRENDS'}
+        preferred_model = "" if is_test_design or is_bug_trend else runtime.spec_preferred_model if is_spec else runtime.preferred_model
+        if not is_test_design and classification.route not in structured_routes and not preferred_model:
             raise HTTPException(status_code=503, detail="Configure a local Ollama model in AI / RAG settings first")
-        selected_admissions = (spec_admissions if is_spec else
+        selected_admissions = (test_design_admissions if is_test_design else spec_admissions if is_spec else
                                factual_admissions if classification.route in structured_routes else admissions)
         lease = selected_admissions.acquire()
         if lease is None:
@@ -475,7 +485,9 @@ def create_app(runtime: PersistentRAGRuntime, token: str, *, max_active_chats: i
                 headers={"Retry-After": "3"},
             )
         try:
-            service = runtime.get_spec_service() if is_spec else runtime.get_service()
+            service = (runtime.get_bug_trend_service() if is_bug_trend else
+                       runtime.get_test_design_service() if is_test_design else
+                       runtime.get_spec_service() if is_spec else runtime.get_service())
         except Exception:
             lease.release(failed=True)
             raise

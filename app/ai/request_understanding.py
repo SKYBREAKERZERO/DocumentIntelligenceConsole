@@ -22,11 +22,18 @@ def understand(ollama, messages, *, model, num_ctx=4096, keep_alive="30m", task_
     # Keep current turn and a bounded, role-labelled history. Assistant text is
     # conversational context only, never evidence of technical requirements.
     recent = [m for m in messages if m.get("role") in {"user", "assistant"}][-10:]
+    current_turn = max(n for n, m in enumerate(recent) if m["role"] == "user")
     history = [{"turn": n, "role":m["role"], "text":str(m.get("content") or "")[:900]}
-               for n,m in enumerate(recent)]
+               for n,m in enumerate(recent) if n < current_turn]
+    current = str(recent[current_turn].get("content") or "")
+    current_limit = max(900, min(6000, num_ctx // 2))
+    if len(current) > current_limit:
+        half = current_limit // 2
+        current = current[:half] + "\n[… middle omitted …]\n" + current[-half:]
+    conversation = {"history": history, "current_user_turn": current_turn, "current_request": current}
     format_options = {}
     if strict_schema:
-        user_turns = [n for n, m in enumerate(recent) if m["role"] == "user"]
+        user_turns = [n for n, m in enumerate(recent) if n <= current_turn and m["role"] == "user"]
         schema = {
             "type": "object",
             "properties": {
@@ -55,6 +62,9 @@ def understand(ollama, messages, *, model, num_ctx=4096, keep_alive="30m", task_
         "of testing, comparison or analysis; its mention does not mean the user wants it explained again. "
         "Resolve pronouns and omitted subjects using history. Preserve the subject while following the latest "
         "requested work. subject_turn must identify a USER turn supplying that subject. "
+        "Carry over only context the current request depends on. A new explicit target supersedes the earlier target. "
+        "If the user corrects a premise, use the correction. For compound questions, represent every explicitly "
+        "requested outcome. Do not turn examples in the current request into extra requirements. "
         "TEST_DESIGN means propose experiments, variations, checks, test charters or verification viewpoints. "
         "PROCESS means explain actual execution order. ANALYSIS means interpret or evaluate evidence. Choose TEST_DESIGN whenever the requested work product is verification actions, even when analysis of weak points motivates them. "
         "Deliverables must reflect the user's actual request, not a generic process template. completion_checks are observable criteria for task completion, not source requirements. They must catch merely repeating an earlier answer. "
@@ -66,7 +76,7 @@ def understand(ollama, messages, *, model, num_ctx=4096, keep_alive="30m", task_
     )
     system += "\n" + task_guidance
     raw = ollama.chat_json(model=model,messages=[{"role":"system","content":system},
-        {"role":"user","content":json.dumps(history,ensure_ascii=False)}],
+        {"role":"user","content":json.dumps(conversation,ensure_ascii=False)}],
         num_ctx=num_ctx,keep_alive=keep_alive,**format_options)
     if not isinstance(raw,dict) or raw.get("task") not in TASKS:
         raise ValueError("invalid semantic task")
@@ -80,7 +90,7 @@ def understand(ollama, messages, *, model, num_ctx=4096, keep_alive="30m", task_
             "including the purpose of interrogative wording across languages. A request for methods "
             "of verifying a weakness requires verification actions, not merely a list of weaknesses. "
             "Preserve the target entity from the actual user history; ignore prior assistant factual assertions."},
-            {"role":"user","content":json.dumps({"history":history,"proposed_contract":raw},ensure_ascii=False)}],
+            {"role":"user","content":json.dumps({**conversation,"proposed_contract":raw},ensure_ascii=False)}],
             num_ctx=num_ctx,keep_alive=keep_alive,**format_options)
     if not isinstance(raw,dict) or raw.get("task") not in TASKS:
         raise ValueError("invalid audited semantic task")

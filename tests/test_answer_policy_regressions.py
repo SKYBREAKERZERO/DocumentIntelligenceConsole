@@ -114,6 +114,19 @@ def test_grounded_answer_rejects_passage_not_in_selected_evidence():
       sources={"1": "Verification is pending.", "2": "Verification succeeded."},
       keep_alive="5m", max_tokens=512, gap_label="Unconfirmed:")
 
+def test_grounded_answer_can_bind_a_comparison_to_both_sources():
+ from app.ai.grounded_answer import draft_from_evidence
+ client = SimpleNamespace(chat_json=lambda **kwargs: {"points": [
+  {"topic": "Storage", "status": "supported", "conclusion": "The storage locations differ.",
+   "basis": "One stores data locally and the other uses a server.", "passage": ["1.1", "2.1"]},
+ ]})
+ conclusion, basis, anchors = draft_from_evidence(
+  client, model="fake", instruction="", request="", num_ctx=4096,
+  sources={"1": "Stores data locally.", "2": "Stores data on a server."},
+  keep_alive="5m", max_tokens=512, gap_label="Unconfirmed:")
+ assert "[E1] [E2]" in conclusion and "[E1] [E2]" in basis
+ assert anchors == ["[E1] Stores data locally.", "[E2] Stores data on a server."]
+
 def test_grounded_answer_accounts_for_an_omitted_named_variant():
  from app.ai.grounded_answer import draft_from_evidence
  result = {"points": [{"topic": "Type C", "status": "supported",

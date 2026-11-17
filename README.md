@@ -1,6 +1,6 @@
 # DocumentIntelligenceConsole
 
-企业式样书、QA/BUG与内容关系的本地检索分析工具。当前源码整理日期：2026-11-03，基于v1.54及后续修复。
+企业式样书、QA/BUG与内容关系的本地检索分析工具，基于 v1.54 及后续修复。
 
 ## 核心流程
 
@@ -33,6 +33,8 @@ py -3.12 -m venv .venv
 Backend默认地址为`http://127.0.0.1:18080`。Open WebUI连接地址为`http://127.0.0.1:18080/v1`，鉴权使用Tool生成的本地API令牌。Docker中的Open WebUI需使用其可访问的宿主机地址，不能把容器内127.0.0.1视为宿主机。
 
 数据库密码、本地令牌和个人配置保留在运行电脑。配置模板为`config/config.yaml`，可通过`CONFIG_FILE`指定配置文件。
+
+首页四张任务卡片及证据展开界面可通过 [Open WebUI v0.12.0 补丁](docs/open-webui-v0.12.0/README.md) 安装。
 
 ## 当前回答行为
 

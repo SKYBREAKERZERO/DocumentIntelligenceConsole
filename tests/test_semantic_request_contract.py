@@ -1,4 +1,5 @@
 from dataclasses import replace
+import json
 from types import SimpleNamespace
 import pytest
 from app.ai.request_understanding import understand, review
@@ -25,6 +26,18 @@ def test_work_and_entity_are_independent(task):
  assert result.task==task and source==HISTORY[0]["content"]
  assert result.completion_checks
  assert "conversational" in captured[0]["messages"][0]["content"]
+
+def test_interpretation_keeps_current_deliverables_after_long_background():
+ captured = []
+ question = "背景" * 510 + "请比较两个版本，再列出验收观察点。"
+ def chat(**kwargs):
+  captured.append(json.loads(kwargs["messages"][1]["content"]))
+  return plan()
+ understand(SimpleNamespace(chat_json=chat),
+            [*HISTORY[:-1], {"role": "user", "content": question}], model="fake")
+ assert all(item["current_request"] == question for item in captured)
+ assert all(item["current_user_turn"] == 4 for item in captured)
+ assert all(len(item["history"]) == 4 for item in captured)
 
 @pytest.mark.parametrize("field,value",[("task","RUN_SQL"),("subject_turn",1),("entity_turn",3),("subject_turn",True),("deliverables",[]),("completion_checks",[]),("subject",""),("entity_turn",99)])
 def test_invalid_contract_is_not_executed(field,value):

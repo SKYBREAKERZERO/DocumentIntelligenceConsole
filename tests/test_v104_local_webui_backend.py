@@ -78,10 +78,15 @@ def test_host_deny_public_domain_even_with_token(client):
     assert client.get("/v1/models", headers={**headers(), "host": "host.docker.internal:18080"}).status_code == 200
 
 
-def test_available_model_is_governed_rag_only(client):
+def test_available_models_are_governed_backend_profiles(client):
     result = client.get("/v1/models", headers=headers())
     assert result.status_code == 200
-    assert [x["id"] for x in result.json()["data"]] == [MODEL_ID]
+    assert {x["id"] for x in result.json()["data"]} == {
+        MODEL_ID,
+        "document-intelligence-spec-query",
+        "document-intelligence-test-design",
+        "document-intelligence-bug-trends",
+    }
 
 
 def test_chat_uses_governed_service_and_returns_rag_metadata(client):

@@ -1,0 +1,455 @@
+diff --git a/src/lib/components/chat/Chat.svelte b/src/lib/components/chat/Chat.svelte
+index b7b9252..6f26b94 100644
+--- a/src/lib/components/chat/Chat.svelte
++++ b/src/lib/components/chat/Chat.svelte
+@@ -5190,6 +5190,7 @@
+ 						{:else}
+ 							<div class="flex items-center h-full">
+ 								<Placeholder
++									showTaskCards={!embedded && !chatIdProp}
+ 									callActive={!!(bridge?.connected || bridge?.connecting)}
+ 									bind:selectedModelIdx
+ 									{history}
+diff --git a/src/lib/components/chat/Messages/Markdown/MarkdownTokens.svelte b/src/lib/components/chat/Messages/Markdown/MarkdownTokens.svelte
+index 4e61aea..38c25ea 100644
+--- a/src/lib/components/chat/Messages/Markdown/MarkdownTokens.svelte
++++ b/src/lib/components/chat/Messages/Markdown/MarkdownTokens.svelte
+@@ -67,6 +67,12 @@
+ 	};
+ 
+ 	const getDisplayTokens = (tokenList: Token[] = []) => {
++		const lastContentIndex = tokenList.findLastIndex((token) => token.type !== 'space');
++		const lastContent = tokenList[lastContentIndex];
++		if (lastContentIndex > 0 && lastContent?.type === 'details' &&
++			lastContent.attributes?.type === 'spec_evidence') {
++			return [{ ...lastContent, conclusionTokens: tokenList.slice(0, lastContentIndex) }];
++		}
+ 		const displayTokens = [];
+ 		let detailGroup = [];
+ 
+@@ -502,7 +508,42 @@
+ 	{:else if token.type === 'details'}
+ 		{@const textContent = getDetailTextContent(token)}
+ 
+-		{#if token?.attributes?.type === 'tool_calls'}
++		{#if token?.attributes?.type === 'spec_evidence'}
++			<div class="relative ps-6">
++				<svelte:self
++					id={`${id}-${tokenIdx}-conclusion`}
++					{chatId}
++					{messageId}
++					tokens={token.conclusionTokens ?? []}
++					{done}
++					{preview}
++					{compactPreview}
++					{sourceIds}
++					{onSourceClick}
++				/>
++			<details class="spec-evidence w-full">
++				<summary class="w-fit cursor-pointer select-none rounded px-1 py-0.5 text-sm text-gray-600 dark:text-gray-300">
++					<span aria-hidden="true" class="spec-evidence-arrow"></span>
++					<span class="spec-evidence-show sr-only">{token.summary || $i18n.t('Show details')}</span>
++					<span class="spec-evidence-hide sr-only">{token.attributes?.collapse || $i18n.t('Collapse')}</span>
++				</summary>
++				<div class="mt-2 border-s border-gray-200 ps-3 dark:border-gray-700">
++					<svelte:self
++						id={`${id}-${tokenIdx}-spec`}
++						{chatId}
++						{messageId}
++						tokens={token.tokens ?? []}
++						{done}
++						{preview}
++						{compactPreview}
++						editCodeBlock={false}
++						{sourceIds}
++						{onSourceClick}
++					/>
++				</div>
++			</details>
++			</div>
++		{:else if token?.attributes?.type === 'tool_calls'}
+ 			<!-- Tool calls have dedicated handling with ToolCallDisplay component -->
+ 			<ToolCallDisplay
+ 				id={`${id}-${tokenIdx}-tc`}
+@@ -646,3 +687,38 @@
+ 		{console.log('Unknown token', token)}
+ 	{/if}
+ {/each}
++
++<style>
++	.spec-evidence summary {
++		position: absolute;
++		inset-inline-start: 0;
++		top: 0;
++		width: 1.25rem;
++		height: 1.5rem;
++		display: flex;
++		align-items: center;
++		justify-content: center;
++		list-style: none;
++	}
++
++	.spec-evidence summary::-webkit-details-marker {
++		display: none;
++	}
++
++	.spec-evidence-arrow {
++		width: 0.375rem;
++		height: 0.375rem;
++		border: solid currentColor;
++		border-width: 0 1.5px 1.5px 0;
++		transform: translateY(-0.1rem) rotate(45deg);
++	}
++
++	.spec-evidence[open] .spec-evidence-arrow {
++		transform: translateY(0.1rem) rotate(225deg);
++	}
++
++	.spec-evidence:not([open]) .spec-evidence-hide,
++	.spec-evidence[open] .spec-evidence-show {
++		display: none;
++	}
++</style>
+diff --git a/src/lib/components/chat/Placeholder.svelte b/src/lib/components/chat/Placeholder.svelte
+index b2833b6..d5f59b7 100644
+--- a/src/lib/components/chat/Placeholder.svelte
++++ b/src/lib/components/chat/Placeholder.svelte
+@@ -12,6 +12,8 @@
+ 
+ 	import {
+ 		config,
++		settings,
++		WEBUI_NAME,
+ 		user,
+ 		models as _models,
+ 		temporaryChatEnabled,
+@@ -21,18 +23,16 @@
+ 	import { sanitizeResponseContent, extractCurlyBraceWords } from '$lib/utils';
+ 	import {
+ 		resolveLocalizedModelDescription,
+-		resolveLocalizedModelName,
+-		resolveLocalizedModelPromptSuggestions,
+-		resolveLocalizedPromptSuggestions
++		resolveLocalizedModelName
+ 	} from '$lib/utils/localizedContent';
+-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
++	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL, WEBUI_VERSION } from '$lib/constants';
+ 
+-	import Suggestions from './Suggestions.svelte';
+ 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+ 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
+ 	import MessageInput from './MessageInput.svelte';
+ 	import FolderPlaceholder from './Placeholder/FolderPlaceholder.svelte';
+ 	import FolderTitle from './Placeholder/FolderTitle.svelte';
++	import TaskCards from './Placeholder/TaskCards.svelte';
+ 
+ 	const i18n: any = getContext('i18n');
+ 
+@@ -41,6 +41,7 @@
+ 
+ 	export let autoScroll = false;
+ 	export let callActive = false;
++	export let showTaskCards = false;
+ 
+ 	export let atSelectedModel: Model | undefined;
+ 	export let selectedModels: [''];
+@@ -90,21 +91,11 @@
+ 	let selectedModel;
+ 	let selectedModelName = '';
+ 	let selectedModelDescription = '';
+-	let selectedSuggestionPrompts = [];
+ 
+ 	$: models = selectedModels.map((id) => $_models.find((m) => m.id === id));
+ 	$: selectedModel = atSelectedModel ?? models[selectedModelIdx];
+ 	$: selectedModelName = resolveLocalizedModelName(selectedModel, $i18n.language);
+ 	$: selectedModelDescription = resolveLocalizedModelDescription(selectedModel, $i18n.language);
+-	$: selectedSuggestionPrompts =
+-		resolveLocalizedModelPromptSuggestions(atSelectedModel, $i18n.language) ??
+-		resolveLocalizedModelPromptSuggestions(models[selectedModelIdx], $i18n.language) ??
+-		resolveLocalizedPromptSuggestions(
+-			$config?.default_prompt_suggestions,
+-			$config?.default_prompt_suggestions_i18n ?? {},
+-			$i18n.language,
+-			(key) => $i18n.t(key)
+-		);
+ 
+ 	// True when viewing a shared folder the current user doesn't own AND lacks write access
+ 	$: folderReadOnly =
+@@ -291,7 +282,61 @@
+ 	{:else}
+ 		<div class="mx-auto max-w-2xl mt-2" in:fade={{ duration: 200, delay: 200 }}>
+ 			<div class="mx-5">
+-				<Suggestions suggestionPrompts={selectedSuggestionPrompts} inputValue={prompt} {onSelect} />
++				{#if showTaskCards}
++					<TaskCards
++						onSelectTask={(taskId) => {
++							const taskModels = {
++								'spec-search': 'document-intelligence-spec-query',
++								'test-design': 'document-intelligence-test-design',
++								'bug-trends': 'document-intelligence-bug-trends'
++							};
++							const modelId = taskId && taskId !== 'qa-bug-search' ? taskModels[taskId] : null;
++							if (!modelId) {
++								if (selectedModels.some((id) => Object.values(taskModels).includes(id))) {
++									atSelectedModel = undefined;
++									selectedModels = [''];
++									selectedModelIdx = 0;
++								}
++								return true;
++							}
++							const model = $_models.find((item) => item.id === modelId);
++							if (!model) {
++								toast.error(
++									$i18n.t(
++										taskId === 'test-design'
++											? 'The test design service is unavailable. Please check the backend connection.'
++											: taskId === 'bug-trends'
++												? 'The BUG trends service is unavailable. Please check the backend connection.'
++												: 'The specification query service is unavailable. Please check the backend connection.'
++									)
++								);
++								return false;
++							}
++							atSelectedModel = undefined;
++							selectedModels = [model.id];
++							selectedModelIdx = 0;
++							return true;
++						}}
++						hasDraft={Boolean(prompt.trim())}
++						onInsert={(template) => {
++							if (!prompt.trim()) messageInput?.setText(template);
++						}}
++					/>
++				{/if}
++				<div
++					class="mb-1 flex gap-1 text-xs font-normal items-center text-gray-600 dark:text-gray-400"
++				>
++					<div
++						class="flex w-full {$settings?.landingPageMode === 'chat'
++							? ' -mt-1'
++							: 'text-center items-center justify-center'} self-start text-gray-600 dark:text-gray-400"
++					>
++						<!-- LICENSE covers this Open WebUI footer identifier.
++						Do not alter, remove, obscure, or replace it except as LICENSE permits:
++						https://docs.openwebui.com/license. -->
++						{$WEBUI_NAME} ‧ v{WEBUI_VERSION}
++					</div>
++				</div>
+ 			</div>
+ 		</div>
+ 	{/if}
+diff --git a/src/lib/i18n/locales/ja-JP/translation.json b/src/lib/i18n/locales/ja-JP/translation.json
+index 864d206..5aba345 100644
+--- a/src/lib/i18n/locales/ja-JP/translation.json
++++ b/src/lib/i18n/locales/ja-JP/translation.json
+@@ -3871,5 +3871,30 @@
+ 	"YouTube": "YouTube",
+ 	"YouTube video player": "YouTube動画プレーヤー",
+ 	"Zoom in": "拡大",
+-	"Zoom out": "縮小"
++	"Zoom out": "縮小",
++	"QA / BUG search": "QA／BUG検索",
++	"Find previous answers, bugs, and resolutions.": "過去の質問、BUG、対応結果を調べます。",
++	"Find relevant QA records and bugs, and summarize their conclusions with sources.\nQuestion or bug: \nFeature or version: ": "関連するQAとBUGの記録を検索し、対応結果と出典を示してください。\n質問またはBUG：\n機能またはバージョン：",
++	"Specification search": "仕様検索",
++	"Find requirements and explain specification workflows.": "仕様の要件や機能、フローを根拠とともに調べます。",
++	"Find the relevant specification, explain the requirements or workflow, and cite the source.\nSpecification or feature: \nQuestion: ": "関連する仕様を検索し、要件またはフローを説明して出典を示してください。\n仕様書または機能：\n質問：",
++	"Test cases / exploration": "テストケース／探索観点",
++	"Generate test cases or exploratory testing ideas.": "仕様、フロー、BUGに基づいてテストを設計します。",
++	"Generate test cases or exploratory testing ideas based on the specification, workflow, or bug.\nSource or feature: \nRequested output and test scope: ": "仕様、フロー、BUGに基づいてテストケースまたは探索的テストの観点を作成してください。\n根拠または機能：\n必要な成果物とテスト範囲：",
++	"BUG trend analysis": "BUG傾向分析",
++	"Analyze bug trends by time, module, and version.": "期間、モジュール、バージョン別にBUGの傾向を分析します。",
++	"Analyze bug trends using the available records and cite the data sources. State any missing data.\nTime range and versions: \nModules and analysis dimensions: ": "既存のBUG記録から傾向を分析し、データの出典と不足を示してください。\n期間とバージョン：\nモジュールと分析軸：",
++	"Task shortcuts": "タスクを選ぶ",
++	"Choose a task to see what to provide.": "タスクを選択すると、必要な情報を確認できます。",
++	"Insert template": "テンプレートを挿入",
++	"Clear the draft to insert a template.": "入力欄を空にするとテンプレートを挿入できます。",
++	"Edit the template in the message box, then send it when ready.": "入力欄で内容を補足し、確認してから送信してください。",
++	"The specification query service is unavailable. Please check the backend connection.": "仕様検索サービスに接続できません。バックエンド接続を確認してください。",
++	"Generate test cases\nTest target: \nScope and focus: ": "テストケースを作成\nテスト対象：\n範囲と確認観点：",
++	"Generate exploratory test ideas\nTest target: \nScope and focus: ": "探索的テストの観点を作成\nテスト対象：\n範囲と確認観点：",
++	"Test cases": "テストケース",
++	"Exploratory test ideas": "探索的テストの観点",
++	"The test design service is unavailable. Please check the backend connection.": "テスト設計サービスを利用できません。バックエンドの接続を確認してください。",
++	"Enter years, months, or dates. Leave the period blank for the last six complete months.\nReporting period: \nIssue type: \nModule: \nSoftware version: \nQuestion: ": "年、月、日付の範囲を指定できます。空欄の場合は直近の完了した6か月を集計します。\n対象期間：\n課題種別：\nモジュール：\nソフトウェアバージョン：\n質問：",
++	"The BUG trends service is unavailable. Please check the backend connection.": "BUG傾向分析サービスを利用できません。バックエンドの接続を確認してください。"
+ }
+diff --git a/src/lib/i18n/locales/zh-CN/translation.json b/src/lib/i18n/locales/zh-CN/translation.json
+index 115f532..3cb4ad9 100644
+--- a/src/lib/i18n/locales/zh-CN/translation.json
++++ b/src/lib/i18n/locales/zh-CN/translation.json
+@@ -3868,5 +3868,30 @@
+ 	"YouTube": "YouTube",
+ 	"YouTube video player": "YouTube 视频播放器",
+ 	"Zoom in": "放大",
+-	"Zoom out": "缩小"
++	"Zoom out": "缩小",
++	"QA / BUG search": "QA／BUG 查询",
++	"Find previous answers, bugs, and resolutions.": "查询已有问答、历史 BUG 和处理结论。",
++	"Find relevant QA records and bugs, and summarize their conclusions with sources.\nQuestion or bug: \nFeature or version: ": "请查询相关 QA 和 BUG 记录，整理处理结论并附上来源。\n问题或 BUG：\n功能或版本：",
++	"Specification search": "式样查询",
++	"Find requirements and explain specification workflows.": "查找式样要求、功能和流程，提供依据。",
++	"Find the relevant specification, explain the requirements or workflow, and cite the source.\nSpecification or feature: \nQuestion: ": "请查找相关式样，解释要求或流程，并引用依据。\n式样或功能：\n问题：",
++	"Test cases / exploration": "生成用例／探索观点",
++	"Generate test cases or exploratory testing ideas.": "根据式样、流程或 BUG 设计测试。",
++	"Generate test cases or exploratory testing ideas based on the specification, workflow, or bug.\nSource or feature: \nRequested output and test scope: ": "请根据式样、流程或 BUG 生成测试用例或探索测试观点。\n依据或功能：\n需要的产出和测试范围：",
++	"BUG trend analysis": "BUG 趋势分析",
++	"Analyze bug trends by time, module, and version.": "分析 BUG 随时间、模块和版本的变化。",
++	"Analyze bug trends using the available records and cite the data sources. State any missing data.\nTime range and versions: \nModules and analysis dimensions: ": "请根据已有 BUG 记录分析趋势，注明数据来源和缺失数据。\n时间范围和版本：\n模块和分析维度：",
++	"Task shortcuts": "任务入口",
++	"Choose a task to see what to provide.": "选择任务，查看需要提供的信息。",
++	"Insert template": "填入模板",
++	"Clear the draft to insert a template.": "输入框已有草稿。清空后可填入模板。",
++	"Edit the template in the message box, then send it when ready.": "在输入框中补齐信息，确认后发送。",
++	"The specification query service is unavailable. Please check the backend connection.": "式样查询服务尚未连接，请检查后端连接。",
++	"Generate test cases\nTest target: \nScope and focus: ": "生成测试用例\n测试对象：\n范围与关注点：",
++	"Generate exploratory test ideas\nTest target: \nScope and focus: ": "生成探索测试观点\n测试对象：\n范围与关注点：",
++	"Test cases": "测试用例",
++	"Exploratory test ideas": "探索测试观点",
++	"The test design service is unavailable. Please check the backend connection.": "测试设计服务不可用，请检查后端连接。",
++	"Enter years, months, or dates. Leave the period blank for the last six complete months.\nReporting period: \nIssue type: \nModule: \nSoftware version: \nQuestion: ": "可填年份、月份或日期范围，留空则统计最近六个完整月。\n时间范围：\n问题类型：\n模块：\n软件版本：\n问题：",
++	"The BUG trends service is unavailable. Please check the backend connection.": "BUG 趋势分析服务不可用，请检查后端连接。"
+ }
+diff --git a/src/lib/components/chat/Placeholder/TaskCards.svelte b/src/lib/components/chat/Placeholder/TaskCards.svelte
+new file mode 100644
+index 0000000..c83e676
+--- /dev/null
++++ b/src/lib/components/chat/Placeholder/TaskCards.svelte
+@@ -0,0 +1,137 @@
++<script lang="ts">
++	import { getContext } from 'svelte';
++	import Document from '$lib/components/icons/Document.svelte';
++	import DocumentCheck from '$lib/components/icons/DocumentCheck.svelte';
++	import DocumentChartBar from '$lib/components/icons/DocumentChartBar.svelte';
++	import Clipboard from '$lib/components/icons/Clipboard.svelte';
++
++	const i18n: any = getContext('i18n');
++
++	type TaskId = 'qa-bug-search' | 'spec-search' | 'test-design' | 'bug-trends';
++
++	export let hasDraft: boolean;
++	export let onInsert: (template: string) => void;
++	export let onSelectTask: (taskId: TaskId | null) => boolean = () => true;
++
++	let selectedTaskId: TaskId | null = null;
++	let testDesignMode = 'case';
++
++	$: testDesignTemplates = {
++		case: $i18n.t('Generate test cases\nTest target: \nScope and focus: '),
++		exploration: $i18n.t('Generate exploratory test ideas\nTest target: \nScope and focus: ')
++	};
++
++	$: tasks = [
++		{
++			id: 'qa-bug-search' as const,
++			icon: DocumentCheck,
++			title: $i18n.t('QA / BUG search'),
++			description: $i18n.t('Find previous answers, bugs, and resolutions.'),
++			template: $i18n.t(
++				'Find relevant QA records and bugs, and summarize their conclusions with sources.\nQuestion or bug: \nFeature or version: '
++			)
++		},
++		{
++			id: 'spec-search' as const,
++			icon: Document,
++			title: $i18n.t('Specification search'),
++			description: $i18n.t('Find requirements and explain specification workflows.'),
++			template: $i18n.t(
++				'Find the relevant specification, explain the requirements or workflow, and cite the source.\nSpecification or feature: \nQuestion: '
++			)
++		},
++		{
++			id: 'test-design' as const,
++			icon: Clipboard,
++			title: $i18n.t('Test cases / exploration'),
++			description: $i18n.t('Generate test cases or exploratory testing ideas.'),
++			template: testDesignTemplates[testDesignMode]
++		},
++		{
++			id: 'bug-trends' as const,
++			icon: DocumentChartBar,
++			title: $i18n.t('BUG trend analysis'),
++			description: $i18n.t('Analyze bug trends by time, module, and version.'),
++			template: $i18n.t(
++				'Enter years, months, or dates. Leave the period blank for the last six complete months.\nReporting period: \nIssue type: \nModule: \nSoftware version: \nQuestion: '
++			)
++		}
++	];
++
++	$: selectedTask = tasks.find((task) => task.id === selectedTaskId);
++</script>
++
++<section aria-label={$i18n.t('Task shortcuts')} class="mb-4 text-left">
++	<div class="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 px-0.5">
++		<h2 class="text-sm font-semibold text-gray-900 dark:text-gray-100">
++			{$i18n.t('Task shortcuts')}
++		</h2>
++		<p class="text-xs text-gray-500 dark:text-gray-400">
++			{$i18n.t('Choose a task to see what to provide.')}
++		</p>
++	</div>
++	<div class="grid grid-cols-1 gap-2 @sm:grid-cols-2">
++		{#each tasks as task (task.id)}
++			<button
++				type="button"
++				aria-pressed={selectedTaskId === task.id}
++				class="flex min-w-0 items-start gap-2.5 rounded-xl border border-gray-200 px-3 py-2.5 text-left transition-colors hover:bg-gray-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 aria-pressed:border-blue-500 aria-pressed:bg-blue-50 dark:border-gray-800 dark:hover:bg-gray-800 dark:aria-pressed:border-blue-500 dark:aria-pressed:bg-blue-950/40"
++				on:click={() => {
++					const nextTask = selectedTaskId === task.id ? null : task.id;
++					if (onSelectTask(nextTask)) {
++						selectedTaskId = nextTask;
++					}
++				}}
++			>
++				<span class="mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" aria-hidden="true">
++					<svelte:component this={task.icon} className="size-4" />
++				</span>
++				<span class="min-w-0">
++					<span class="block text-sm font-medium text-gray-900 dark:text-gray-100">
++						{task.title}
++					</span>
++					<span class="mt-0.5 block text-xs text-gray-600 dark:text-gray-400">
++						{task.description}
++					</span>
++				</span>
++			</button>
++		{/each}
++	</div>
++
++	{#if selectedTask}
++		<div class="mt-2 rounded-xl bg-gray-50 px-3 py-3 dark:bg-gray-900">
++			{#if selectedTask.id === 'test-design'}
++				<div class="mb-2 flex flex-wrap gap-2">
++					{#each [['case', $i18n.t('Test cases')], ['exploration', $i18n.t('Exploratory test ideas')]] as [mode, label]}
++						<button
++							type="button"
++							aria-pressed={testDesignMode === mode}
++							class="rounded-md border border-gray-200 px-2 py-1 text-xs hover:bg-gray-100 aria-pressed:border-blue-500 aria-pressed:text-blue-700 dark:border-gray-700 dark:hover:bg-gray-800 dark:aria-pressed:text-blue-300"
++							on:click={() => (testDesignMode = mode)}
++						>
++							{label}
++						</button>
++					{/each}
++				</div>
++			{/if}
++			<p aria-live="polite" class="whitespace-pre-line text-xs text-gray-700 dark:text-gray-300">
++				{selectedTask.template}
++			</p>
++			<div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
++				<button
++					type="button"
++					class="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
++					disabled={hasDraft}
++					on:click={() => onInsert(selectedTask.template)}
++				>
++					{$i18n.t('Insert template')}
++				</button>
++				<p class="text-xs text-gray-500 dark:text-gray-400">
++					{hasDraft
++						? $i18n.t('Clear the draft to insert a template.')
++						: $i18n.t('Edit the template in the message box, then send it when ready.')}
++				</p>
++			</div>
++		</div>
++	{/if}
++</section>

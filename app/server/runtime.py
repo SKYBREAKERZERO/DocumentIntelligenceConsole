@@ -19,6 +19,8 @@ class PersistentRAGRuntime:
         self.profiles, self.password, self.qdrant, self.qdrant_key = load_profiles(self.config_dir)
         self._instance: EnterpriseRAGService | None = None
         self._spec_instance: EnterpriseRAGService | None = None
+        self._test_design_instance = None
+        self._bug_trend_instance = None
         self._lock = threading.RLock()
         self._warmup_state = "NOT_STARTED"
         self._warmup_error = ""
@@ -72,6 +74,33 @@ class PersistentRAGRuntime:
                     qdrant_profile=self.qdrant, qdrant_api_key=self.qdrant_key,
                 )
             return self._spec_instance
+
+    def get_test_design_service(self):
+        from app.ai.test_design import TestDesignService, load_test_design_settings
+        from app.ai.retrieval import EnterpriseRetriever
+        with self._lock:
+            if self._test_design_instance is None:
+                settings = load_test_design_settings(self.config_dir, self.settings)
+                retriever = EnterpriseRetriever(
+                    postgres_profiles=self.profiles, postgres_password=self.password,
+                    qdrant=self.qdrant, qdrant_api_key=self.qdrant_key,
+                    collections=settings.collections, embedding_model=settings.embedding_model,
+                    vector_dimension=settings.vector_dimension,
+                    top_k=max(settings.top_k, settings.evidence_limit), min_score=settings.min_score)
+                self._test_design_instance = TestDesignService(settings, retriever)
+            return self._test_design_instance
+
+    def get_bug_trend_service(self):
+        from app.ai.bug_trends import BugTrendService
+        from app.ai.retrieval import EnterpriseRetriever
+        with self._lock:
+            if self._bug_trend_instance is None:
+                retriever = EnterpriseRetriever(
+                    postgres_profiles=self.profiles, postgres_password=self.password,
+                    qdrant=self.qdrant, qdrant_api_key="", collections={},
+                )
+                self._bug_trend_instance = BugTrendService(retriever)
+            return self._bug_trend_instance
 
     def warmup_async(self) -> None:
         if self._warmup_state != "NOT_STARTED":

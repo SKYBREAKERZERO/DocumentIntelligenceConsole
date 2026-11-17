@@ -26,7 +26,11 @@ def draft_from_evidence(client, *, model, instruction, request, sources, num_ctx
         "status": {"type": "string", "enum": ["supported", "unconfirmed"]},
         "conclusion": {"type": "string"},
         "basis": {"type": "string"},
-        "passage": {"type": "string", "enum": ["", *passages]},
+        "passage": {"anyOf": [
+            {"type": "string", "enum": ["", *passages]},
+            {"type": "array", "minItems": 1, "maxItems": 3,
+             "items": {"type": "string", "enum": list(passages)}},
+        ]},
     }
     schema = {
         "type": "object",
@@ -54,7 +58,7 @@ def draft_from_evidence(client, *, model, instruction, request, sources, num_ctx
     available = _variants("\n".join(sources.values()))
     for finding in points:
         if not isinstance(finding, dict) or any(
-                not isinstance(finding.get(field), str) for field in fields):
+                not isinstance(finding.get(field), str) for field in fields if field != "passage"):
             raise ValueError("Each point must match the requested fields.")
         topic = finding["topic"].strip()
         if not topic or len(topic) > 100 or re.search(r"[\n<>\[\]]", topic):
@@ -69,23 +73,27 @@ def draft_from_evidence(client, *, model, instruction, request, sources, num_ctx
             continue
         if finding["status"] != "supported":
             raise ValueError("Mark each topic supported or unconfirmed.")
-        passage = finding["passage"].strip()
-        if passage not in passages:
+        selected = finding.get("passage")
+        if isinstance(selected, str):
+            selected = [selected.strip()]
+        if not isinstance(selected, list) or not 1 <= len(selected) <= 3 or any(
+                not isinstance(passage, str) or passage not in passages for passage in selected):
             raise ValueError("Select the ID of a supplied passage that directly supports the point.")
-        marker = passage.split(".", 1)[0]
+        markers = tuple(dict.fromkeys(passage.split(".", 1)[0] for passage in selected))
         conclusion, basis = finding["conclusion"].strip(), finding["basis"].strip()
         if not conclusion or not basis:
             raise ValueError("A supported point needs both a conclusion and an explanation.")
-        if (set(SOURCE_MARKER.findall(conclusion + "\n" + basis)) - {marker}
+        if (set(SOURCE_MARKER.findall(conclusion + "\n" + basis)) - set(markers)
                 or re.search(r"</?details\b", conclusion + basis, re.I)):
             raise ValueError("A finding may only reference its selected passage.")
         conclusion = SOURCE_MARKER.sub("", conclusion).strip()
         basis = SOURCE_MARKER.sub("", basis).strip()
         if not conclusion or not basis:
             raise ValueError("A supported point needs explanatory text in addition to its source.")
-        conclusions.append(f"{conclusion} [E{marker}]")
-        explanations.append(f"- {basis} [E{marker}]")
-        anchors.append(f"[E{marker}] {passages[passage]}")
+        citations = " ".join(f"[E{marker}]" for marker in markers)
+        conclusions.append(f"{conclusion} {citations}")
+        explanations.append(f"- {basis} {citations}")
+        anchors.extend(f"[E{passage.split('.', 1)[0]}] {passages[passage]}" for passage in dict.fromkeys(selected))
     covered = _variants("\n".join(conclusions))
     for normalized, label in requested.items():
         if normalized in covered:

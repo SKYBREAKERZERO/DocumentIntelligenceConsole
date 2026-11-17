@@ -12,3 +12,4 @@
 *.xlsx binary
 *.docx binary
 *.pptx binary
+docs/open-webui-v0.12.0/*.patch text eol=lf whitespace=-blank-at-eol,-space-before-tab
